@@ -7103,14 +7103,11 @@ export class AgentSession {
 				throw new Error(formatNoModelSelectedMessage());
 			}
 
-			const { apiKey, headers } = await this._getRequiredRequestAuth(this.model);
-			const result = await this._performCompaction({
-				model: this.model,
-				apiKey,
-				headers,
+			const result = await this._runCompactionWithKimiRouting(
+				this.model,
 				customInstructions,
-				signal: this._compactionAbortController.signal,
-			});
+				this._compactionAbortController.signal,
+			);
 
 			this._emit({
 				type: "compaction_end",
@@ -7159,6 +7156,99 @@ export class AgentSession {
 					hadPostCompactionContinue || this.agent.hasQueuedMessages() || this.unfinishedActionCount > 0,
 				);
 			}
+		}
+	}
+	/**
+	 * Picks the Kimi For Coding model to use for compaction: the quota-efficient
+	 * `k3-256k` when the current context is estimated to fit its window, else
+	 * the wider `k3` (1M window). Returns undefined when neither is present in
+	 * the catalog.
+	 */
+	private _pickKimiCompactionModel(): Model<any> | undefined {
+		const k3_256k = this._modelRegistry.find("kimi-coding", "k3-256k");
+		const k3 = this._modelRegistry.find("kimi-coding", "k3");
+		if (!k3_256k) return k3;
+		if (!k3) return k3_256k;
+
+		const tokens = estimateContextTokens(this.agent.state.messages).tokens;
+		const usableBudget = k3_256k.contextWindow - k3_256k.maxTokens;
+		return tokens > 0 && tokens < usableBudget ? k3_256k : k3;
+	}
+
+	/**
+	 * Resolves auth for compaction, preferring Kimi For Coding over the active
+	 * chat model. Routine context summarization has no reason to run through
+	 * whatever (often OAuth-gated) provider is driving the conversation, so
+	 * default to the cheap/available Kimi models and only fall back to
+	 * `fallbackModel` when Kimi is unauthenticated or its auth resolution fails.
+	 */
+	private async _resolveCompactionAuth(fallbackModel: Model<any>): Promise<{
+		model: Model<any>;
+		apiKey: string;
+		headers?: Record<string, string>;
+	}> {
+		if (fallbackModel.provider !== "kimi-coding") {
+			const preferred = this._pickKimiCompactionModel();
+			if (preferred) {
+				try {
+					const auth = await this._getRequiredRequestAuth(preferred);
+					return { model: preferred, ...auth };
+				} catch {
+					// Kimi not authenticated (or a transient auth failure) — fall
+					// through to the active chat model below.
+				}
+			}
+		}
+		const auth = await this._getRequiredRequestAuth(fallbackModel);
+		return { model: fallbackModel, ...auth };
+	}
+
+	private _looksLikeContextOverflow(message: string): boolean {
+		return /context.{0,20}(length|window)|too (long|large)|maximum context|context_length_exceeded|exceeds? the (context|model)/i.test(
+			message,
+		);
+	}
+
+	/**
+	 * Resolves auth via `_resolveCompactionAuth` and runs `_performCompaction`.
+	 * If the chosen model was Kimi's `k3-256k` and the request overflows its
+	 * window, retries once against `k3` (1M window) before giving up.
+	 */
+	private async _runCompactionWithKimiRouting(
+		fallbackModel: Model<any>,
+		customInstructions: string | undefined,
+		signal: AbortSignal,
+	): Promise<CompactionResult> {
+		const auth = await this._resolveCompactionAuth(fallbackModel);
+
+		try {
+			return await this._performCompaction({
+				model: auth.model,
+				apiKey: auth.apiKey,
+				headers: auth.headers,
+				customInstructions,
+				signal,
+			});
+		} catch (error) {
+			if (
+				auth.model.provider !== "kimi-coding" ||
+				auth.model.id !== "k3-256k" ||
+				!(error instanceof Error) ||
+				!this._looksLikeContextOverflow(error.message)
+			) {
+				throw error;
+			}
+			const k3 = this._modelRegistry.find("kimi-coding", "k3");
+			if (!k3) throw error;
+			const k3Auth = await this._getRequiredRequestAuth(k3).catch(() => undefined);
+			if (!k3Auth) throw error;
+			return await this._performCompaction({
+				model: k3,
+				apiKey: k3Auth.apiKey,
+				headers: k3Auth.headers,
+				customInstructions,
+				signal,
+			});
 		}
 	}
 
@@ -8195,15 +8285,8 @@ export class AgentSession {
 		this._autoCompactionAbortController = new AbortController();
 
 		try {
-			const authResult = this.model ? await this._modelRegistry.getApiKeyAndHeaders(this.model) : undefined;
-			if (!this.model || !authResult || !authResult.ok || !authResult.apiKey) {
-				const detail =
-					!this.model || !authResult
-						? "no model is selected"
-						: authResult.ok
-							? "no API key is available"
-							: authResult.error;
-				this._endCompactionUnsuccessfully(reason, "failed", `Compaction failed: ${detail}`);
+			if (!this.model) {
+				this._endCompactionUnsuccessfully(reason, "failed", "Compaction failed: no model is selected");
 				this._clearQueuedAutonomousContinuationsAfterSkippedThresholdCompaction(
 					reason === "threshold" && shouldContinueAfterCompaction,
 					queuedAutonomousContinuationsForThisCompaction,
@@ -8212,13 +8295,11 @@ export class AgentSession {
 				return false;
 			}
 
-			const result = await this._performCompaction({
-				model: this.model,
-				apiKey: authResult.apiKey,
-				headers: authResult.headers,
+			const result = await this._runCompactionWithKimiRouting(
+				this.model,
 				customInstructions,
-				signal: this._autoCompactionAbortController.signal,
-			});
+				this._autoCompactionAbortController.signal,
+			);
 
 			this._emit({
 				type: "compaction_end",
