@@ -5,6 +5,7 @@
  * for OAuth-based providers:
  * - Anthropic (Claude Pro/Max)
  * - GitHub Copilot
+ * - Kimi For Coding
  */
 
 // Anthropic
@@ -17,6 +18,8 @@ export {
 	normalizeDomain,
 	refreshGitHubCopilotToken,
 } from "./github-copilot.js";
+// Kimi For Coding
+export { getKimiCommonHeaders, kimiCodingOAuthProvider, loginKimi, refreshKimiToken } from "./kimi-coding.js";
 // OpenAI Codex (ChatGPT OAuth)
 export { loginOpenAICodex, openaiCodexOAuthProvider, refreshOpenAICodexToken } from "./openai-codex.js";
 
@@ -28,12 +31,14 @@ export * from "./types.js";
 
 import { anthropicOAuthProvider } from "./anthropic.js";
 import { githubCopilotOAuthProvider } from "./github-copilot.js";
+import { kimiCodingOAuthProvider } from "./kimi-coding.js";
 import { openaiCodexOAuthProvider } from "./openai-codex.js";
 import type { OAuthCredentials, OAuthProviderId, OAuthProviderInfo, OAuthProviderInterface } from "./types.js";
 
 const BUILT_IN_OAUTH_PROVIDERS: OAuthProviderInterface[] = [
 	anthropicOAuthProvider,
 	githubCopilotOAuthProvider,
+	kimiCodingOAuthProvider,
 	openaiCodexOAuthProvider,
 ];
 
