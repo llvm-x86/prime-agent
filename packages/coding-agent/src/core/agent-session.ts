@@ -7254,6 +7254,42 @@ export class AgentSession {
 		);
 	}
 
+	private _isUsageLimitError(error: unknown): boolean {
+		const message = error instanceof Error ? error.message : String(error);
+		return /usage.?limit|usage_limit_reached|billing cycle|quota.?(?:exceeded|reached|insufficient)|insufficient.?(?:balance|quota)|run out of credits|out of credits/i.test(
+			message,
+		);
+	}
+
+	/**
+	 * Runs compaction against the DeepSeek siblings (pro, then flash), used as
+	 * the cross-provider fallback when a summarizer's own quota is exhausted.
+	 * Returns undefined when neither DeepSeek model can authenticate or run.
+	 */
+	private async _tryDeepseekCompaction(
+		customInstructions: string | undefined,
+		signal: AbortSignal,
+	): Promise<CompactionResult | undefined> {
+		for (const id of ["deepseek-v4-pro", "deepseek-v4-flash"] as const) {
+			const model = this._modelRegistry.find("deepseek", id);
+			if (!model) continue;
+			const auth = await this._getRequiredRequestAuth(model).catch(() => undefined);
+			if (!auth) continue;
+			try {
+				return await this._performCompaction({
+					model,
+					apiKey: auth.apiKey,
+					headers: auth.headers,
+					customInstructions,
+					signal,
+				});
+			} catch {
+				// Fall through to the next DeepSeek sibling.
+			}
+		}
+		return undefined;
+	}
+
 	/**
 	 * Resolves auth via `_resolveCompactionAuth` and runs `_performCompaction`.
 	 * On failure it retries once: DeepSeek `deepseek-v4-pro` against
@@ -7291,6 +7327,13 @@ export class AgentSession {
 					}
 				}
 				throw error;
+			}
+			// A non-DeepSeek summarizer (Kimi, or the configured fallback list) hit
+			// its usage limit — retry against DeepSeek pro → flash instead of
+			// surfacing the quota failure.
+			if (this._isUsageLimitError(error) && auth.model.provider !== "deepseek") {
+				const deepseekResult = await this._tryDeepseekCompaction(customInstructions, signal);
+				if (deepseekResult) return deepseekResult;
 			}
 			if (!(error instanceof Error) || !this._looksLikeContextOverflow(error.message)) {
 				throw error;

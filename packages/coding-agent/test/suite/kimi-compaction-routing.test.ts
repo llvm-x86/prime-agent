@@ -1,5 +1,5 @@
 import { fauxAssistantMessage, type Model } from "@earendil-works/pi-ai";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createHarness, type Harness } from "./harness.js";
 
 type SessionWithKimiCompactionInternals = {
@@ -216,5 +216,42 @@ describe("AgentSession compaction routing", () => {
 		const auth = await internals._resolveCompactionAuth(anthropicModel);
 		expect(auth.model.provider).toBe("deepseek");
 		expect(auth.model.id).toBe("deepseek-v4-flash");
+	});
+	it("falls back to deepseek-v4-pro when the kimi fallback hits its usage limit", async () => {
+		const harness = await createHarness();
+		registerKimiCoding(harness);
+		registerDeepseek(harness);
+		registerAnthropic(harness);
+		setContextTokens(harness, 1000);
+
+		const session = harness.session as unknown as {
+			_performCompaction: (options: {
+				model: Model<any>;
+			}) => Promise<{ summary: string; firstKeptEntryId: string; tokensBefore: number }>;
+			_runCompactionWithKimiRouting: (
+				fallbackModel: Model<any>,
+				customInstructions: string | undefined,
+				signal: AbortSignal,
+			) => Promise<{ summary: string }>;
+		};
+		const attempted: string[] = [];
+		vi.spyOn(session, "_performCompaction").mockImplementation(async (options) => {
+			attempted.push(options.model.id);
+			if (options.model.provider === "kimi-coding") {
+				throw new Error("You've reached your usage limit for this billing cycle.");
+			}
+			return { summary: "ok", firstKeptEntryId: "e1", tokensBefore: 0 };
+		});
+
+		const anthropicModel = harness.session.modelRegistry.find("anthropic", "claude-sonnet")!;
+		const result = await session._runCompactionWithKimiRouting(
+			anthropicModel,
+			undefined,
+			new AbortController().signal,
+		);
+
+		expect(result.summary).toBe("ok");
+		expect(attempted[0]).toBe("k3-256k");
+		expect(attempted).toContain("deepseek-v4-pro");
 	});
 });
