@@ -7176,18 +7176,41 @@ export class AgentSession {
 	}
 
 	/**
-	 * Resolves auth for compaction, preferring Kimi For Coding over the active
-	 * chat model. Routine context summarization has no reason to run through
-	 * whatever (often OAuth-gated) provider is driving the conversation, so
-	 * default to the cheap/available Kimi models and only fall back to
-	 * `fallbackModel` when Kimi is unauthenticated or its auth resolution fails.
+	 * Picks the DeepSeek model to use for compaction: the `deepseek-v4-pro`
+	 * variant when present, else `deepseek-v4-flash`. Returns undefined when
+	 * neither is in the catalog.
+	 */
+	private _pickDeepseekCompactionModel(): Model<any> | undefined {
+		return (
+			this._modelRegistry.find("deepseek", "deepseek-v4-pro") ??
+			this._modelRegistry.find("deepseek", "deepseek-v4-flash")
+		);
+	}
+
+	/**
+	 * Resolves auth for compaction. DeepSeek models route to their pro variant
+	 * (deepseek-v4-pro) rather than Kimi. Claude (anthropic) is the only chat
+	 * model that NEEDS an external summarizer — it can't run a reliable local
+	 * summary, so it routes through the cheap/available Kimi models. Every
+	 * other provider summarizes through itself.
 	 */
 	private async _resolveCompactionAuth(fallbackModel: Model<any>): Promise<{
 		model: Model<any>;
 		apiKey: string;
 		headers?: Record<string, string>;
 	}> {
-		if (fallbackModel.provider !== "kimi-coding") {
+		if (fallbackModel.provider === "deepseek") {
+			const preferred = this._pickDeepseekCompactionModel();
+			if (preferred) {
+				try {
+					const auth = await this._getRequiredRequestAuth(preferred);
+					return { model: preferred, ...auth };
+				} catch {
+					// DeepSeek not authenticated (or a transient auth failure) —
+					// fall through to the active chat model below.
+				}
+			}
+		} else if (fallbackModel.provider === "anthropic") {
 			const preferred = this._pickKimiCompactionModel();
 			if (preferred) {
 				try {
@@ -7211,8 +7234,9 @@ export class AgentSession {
 
 	/**
 	 * Resolves auth via `_resolveCompactionAuth` and runs `_performCompaction`.
-	 * If the chosen model was Kimi's `k3-256k` and the request overflows its
-	 * window, retries once against `k3` (1M window) before giving up.
+	 * On failure it falls back to the sibling summarizer once: DeepSeek
+	 * `deepseek-v4-pro` retries against `deepseek-v4-flash`, and Kimi's
+	 * `k3-256k` retries against `k3` (1M window) on context overflow.
 	 */
 	private async _runCompactionWithKimiRouting(
 		fallbackModel: Model<any>,
@@ -7230,6 +7254,22 @@ export class AgentSession {
 				signal,
 			});
 		} catch (error) {
+			if (auth.model.provider === "deepseek" && auth.model.id === "deepseek-v4-pro") {
+				const flash = this._modelRegistry.find("deepseek", "deepseek-v4-flash");
+				if (flash) {
+					const flashAuth = await this._getRequiredRequestAuth(flash).catch(() => undefined);
+					if (flashAuth) {
+						return await this._performCompaction({
+							model: flash,
+							apiKey: flashAuth.apiKey,
+							headers: flashAuth.headers,
+							customInstructions,
+							signal,
+						});
+					}
+				}
+				throw error;
+			}
 			if (
 				auth.model.provider !== "kimi-coding" ||
 				auth.model.id !== "k3-256k" ||

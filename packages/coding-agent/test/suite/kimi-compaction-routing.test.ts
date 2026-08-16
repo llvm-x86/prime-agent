@@ -4,6 +4,7 @@ import { createHarness, type Harness } from "./harness.js";
 
 type SessionWithKimiCompactionInternals = {
 	_pickKimiCompactionModel: () => Model<any> | undefined;
+	_pickDeepseekCompactionModel: () => Model<any> | undefined;
 	_resolveCompactionAuth: (fallbackModel: Model<any>) => Promise<{
 		model: Model<any>;
 		apiKey: string;
@@ -65,22 +66,74 @@ function registerKimiCoding(harness: Harness): void {
 	});
 }
 
-describe("AgentSession Kimi-first compaction routing", () => {
-	it("falls back to the active model when Kimi For Coding isn't authenticated", async () => {
+function registerDeepseek(harness: Harness): void {
+	harness.session.modelRegistry.registerProvider("deepseek", {
+		baseUrl: "https://api.deepseek.com",
+		apiKey: "deepseek-faux-key",
+		api: "openai-completions",
+		models: [
+			{
+				id: "deepseek-v4-pro",
+				name: "DeepSeek V4 Pro",
+				api: "openai-completions",
+				reasoning: true,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 1000000,
+				maxTokens: 384000,
+			},
+			{
+				id: "deepseek-v4-flash",
+				name: "DeepSeek V4 Flash",
+				api: "openai-completions",
+				reasoning: true,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 1000000,
+				maxTokens: 384000,
+			},
+		] as any,
+	});
+}
+
+function registerAnthropic(harness: Harness): void {
+	harness.session.modelRegistry.registerProvider("anthropic", {
+		baseUrl: "https://api.anthropic.com",
+		apiKey: "anthropic-faux-key",
+		api: "anthropic-messages",
+		models: [
+			{
+				id: "claude-sonnet",
+				name: "Claude Sonnet",
+				api: "anthropic-messages",
+				reasoning: true,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 200000,
+				maxTokens: 64000,
+			},
+		] as any,
+	});
+}
+
+describe("AgentSession compaction routing", () => {
+	it("stays on the active model when it is neither deepseek nor anthropic (no Kimi redirect)", async () => {
 		const harness = await createHarness();
+		registerKimiCoding(harness);
 		const internals = harness.session as unknown as SessionWithKimiCompactionInternals;
 
-		// _pickKimiCompactionModel only chooses among catalog entries; auth
-		// gating happens in _resolveCompactionAuth, asserted below.
+		// A non-Claude, non-DeepSeek active model summarizes through itself;
+		// Kimi is available but must not be selected.
 		const fallbackModel = harness.getModel();
 		const auth = await internals._resolveCompactionAuth(fallbackModel);
 		expect(auth.model.provider).toBe(fallbackModel.provider);
 		expect(auth.model.id).toBe(fallbackModel.id);
 	});
 
-	it("prefers Kimi k3-256k over the active chat model when authenticated and context fits", async () => {
+	it("routes Claude (anthropic) through kimi k3-256k when authenticated and context fits", async () => {
 		const harness = await createHarness();
 		registerKimiCoding(harness);
+		registerAnthropic(harness);
 		setContextTokens(harness, 1000); // well under k3-256k's usable budget
 
 		const internals = harness.session as unknown as SessionWithKimiCompactionInternals;
@@ -88,8 +141,8 @@ describe("AgentSession Kimi-first compaction routing", () => {
 		expect(picked?.provider).toBe("kimi-coding");
 		expect(picked?.id).toBe("k3-256k");
 
-		const fallbackModel = harness.getModel();
-		const auth = await internals._resolveCompactionAuth(fallbackModel);
+		const anthropicModel = harness.session.modelRegistry.find("anthropic", "claude-sonnet")!;
+		const auth = await internals._resolveCompactionAuth(anthropicModel);
 		expect(auth.model.provider).toBe("kimi-coding");
 		expect(auth.model.id).toBe("k3-256k");
 		expect(auth.apiKey).toBe("kimi-faux-key");
@@ -107,6 +160,23 @@ describe("AgentSession Kimi-first compaction routing", () => {
 		expect(picked?.id).toBe("k3");
 	});
 
+	it("routes deepseek through deepseek-v4-pro (never Kimi)", async () => {
+		const harness = await createHarness();
+		registerDeepseek(harness);
+		registerKimiCoding(harness);
+
+		const internals = harness.session as unknown as SessionWithKimiCompactionInternals;
+		const picked = internals._pickDeepseekCompactionModel();
+		expect(picked?.provider).toBe("deepseek");
+		expect(picked?.id).toBe("deepseek-v4-pro");
+
+		const deepseekModel = harness.session.modelRegistry.find("deepseek", "deepseek-v4-flash")!;
+		const auth = await internals._resolveCompactionAuth(deepseekModel);
+		expect(auth.model.provider).toBe("deepseek");
+		expect(auth.model.id).toBe("deepseek-v4-pro");
+		expect(auth.apiKey).toBe("deepseek-faux-key");
+	});
+
 	it("stays on Kimi when the active model is already kimi-coding (no redundant redirect)", async () => {
 		const harness = await createHarness();
 		registerKimiCoding(harness);
@@ -116,7 +186,7 @@ describe("AgentSession Kimi-first compaction routing", () => {
 		const kimiK3 = harness.session.modelRegistry.find("kimi-coding", "k3")!;
 		const auth = await internals._resolveCompactionAuth(kimiK3);
 		// Active model is already kimi-coding — the resolver must not redirect
-		// away from it (it only redirects when the active provider isn't Kimi).
+		// away from it.
 		expect(auth.model.provider).toBe("kimi-coding");
 		expect(auth.model.id).toBe("k3");
 	});
