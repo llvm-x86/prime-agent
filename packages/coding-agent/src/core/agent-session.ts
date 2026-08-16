@@ -7159,20 +7159,42 @@ export class AgentSession {
 		}
 	}
 	/**
-	 * Picks the Kimi For Coding model to use for compaction: the quota-efficient
-	 * `k3-256k` when the current context is estimated to fit its window, else
-	 * the wider `k3` (1M window). Returns undefined when neither is present in
-	 * the catalog.
+	 * Resolves the configured compaction fallback summarizers, smallest window
+	 * first. Each token is a "provider/id" selector whose context window is its
+	 * token threshold. Defaults to Kimi `k3-256k` → `k3` (1M window).
+	 */
+	private _resolveCompactionFallbackModels(): Model<any>[] {
+		const raw = this.settingsManager.getCompactionFallbackModels();
+		const resolved: Model<any>[] = [];
+		for (const token of raw
+			.split(/[\s,]+/)
+			.map((part) => part.trim())
+			.filter(Boolean)) {
+			const slash = token.indexOf("/");
+			if (slash === -1) continue;
+			const provider = token.slice(0, slash).trim();
+			const id = token.slice(slash + 1).trim();
+			const model = provider && id ? this._modelRegistry.find(provider, id) : undefined;
+			if (model) resolved.push(model);
+		}
+		return resolved;
+	}
+
+	/**
+	 * Picks the compaction fallback summarizer: the first configured model whose
+	 * usable budget (contextWindow − maxTokens) still fits the current context,
+	 * else the widest. Returns undefined when the configured list is empty.
 	 */
 	private _pickKimiCompactionModel(): Model<any> | undefined {
-		const k3_256k = this._modelRegistry.find("kimi-coding", "k3-256k");
-		const k3 = this._modelRegistry.find("kimi-coding", "k3");
-		if (!k3_256k) return k3;
-		if (!k3) return k3_256k;
+		const fallbacks = this._resolveCompactionFallbackModels();
+		if (fallbacks.length === 0) return undefined;
 
 		const tokens = estimateContextTokens(this.agent.state.messages).tokens;
-		const usableBudget = k3_256k.contextWindow - k3_256k.maxTokens;
-		return tokens > 0 && tokens < usableBudget ? k3_256k : k3;
+		const fitting = fallbacks.find((model) => {
+			const usableBudget = model.contextWindow - model.maxTokens;
+			return tokens > 0 && tokens < usableBudget;
+		});
+		return fitting ?? fallbacks[fallbacks.length - 1];
 	}
 
 	/**
@@ -7191,8 +7213,8 @@ export class AgentSession {
 	 * Resolves auth for compaction. DeepSeek models route to their pro variant
 	 * (deepseek-v4-pro) rather than Kimi. Claude (anthropic) is the only chat
 	 * model that NEEDS an external summarizer — it can't run a reliable local
-	 * summary, so it routes through the cheap/available Kimi models. Every
-	 * other provider summarizes through itself.
+	 * summary, so it routes through the configured fallback models (Kimi by
+	 * default). Every other provider summarizes through itself.
 	 */
 	private async _resolveCompactionAuth(fallbackModel: Model<any>): Promise<{
 		model: Model<any>;
@@ -7234,9 +7256,9 @@ export class AgentSession {
 
 	/**
 	 * Resolves auth via `_resolveCompactionAuth` and runs `_performCompaction`.
-	 * On failure it falls back to the sibling summarizer once: DeepSeek
-	 * `deepseek-v4-pro` retries against `deepseek-v4-flash`, and Kimi's
-	 * `k3-256k` retries against `k3` (1M window) on context overflow.
+	 * On failure it retries once: DeepSeek `deepseek-v4-pro` against
+	 * `deepseek-v4-flash`, and a configured fallback summarizer against the next
+	 * wider entry in the list on context overflow.
 	 */
 	private async _runCompactionWithKimiRouting(
 		fallbackModel: Model<any>,
@@ -7270,25 +7292,27 @@ export class AgentSession {
 				}
 				throw error;
 			}
-			if (
-				auth.model.provider !== "kimi-coding" ||
-				auth.model.id !== "k3-256k" ||
-				!(error instanceof Error) ||
-				!this._looksLikeContextOverflow(error.message)
-			) {
+			if (!(error instanceof Error) || !this._looksLikeContextOverflow(error.message)) {
 				throw error;
 			}
-			const k3 = this._modelRegistry.find("kimi-coding", "k3");
-			if (!k3) throw error;
-			const k3Auth = await this._getRequiredRequestAuth(k3).catch(() => undefined);
-			if (!k3Auth) throw error;
-			return await this._performCompaction({
-				model: k3,
-				apiKey: k3Auth.apiKey,
-				headers: k3Auth.headers,
-				customInstructions,
-				signal,
-			});
+			// On context overflow, retry with the next wider configured summarizer.
+			const fallbacks = this._resolveCompactionFallbackModels();
+			const index = fallbacks.findIndex(
+				(model) => model.provider === auth.model.provider && model.id === auth.model.id,
+			);
+			if (index === -1) throw error;
+			for (const next of fallbacks.slice(index + 1)) {
+				const nextAuth = await this._getRequiredRequestAuth(next).catch(() => undefined);
+				if (!nextAuth) continue;
+				return await this._performCompaction({
+					model: next,
+					apiKey: nextAuth.apiKey,
+					headers: nextAuth.headers,
+					customInstructions,
+					signal,
+				});
+			}
+			throw error;
 		}
 	}
 

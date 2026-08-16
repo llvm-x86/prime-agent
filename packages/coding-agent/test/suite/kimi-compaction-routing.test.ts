@@ -190,4 +190,31 @@ describe("AgentSession compaction routing", () => {
 		expect(auth.model.provider).toBe("kimi-coding");
 		expect(auth.model.id).toBe("k3");
 	});
+	it("honors a custom compaction.fallbackModels list (skips unlisted models)", async () => {
+		const harness = await createHarness({
+			settings: { compaction: { fallbackModels: "kimi-coding/k3" } },
+		});
+		registerKimiCoding(harness);
+		// 50k tokens fits k3-256k's usable budget, but k3-256k is unlisted.
+		setContextTokens(harness, 50_000);
+
+		const internals = harness.session as unknown as SessionWithKimiCompactionInternals;
+		expect(internals._pickKimiCompactionModel()?.id).toBe("k3");
+	});
+
+	it("routes Claude through a non-Kimi fallback when configured", async () => {
+		const harness = await createHarness({
+			settings: { compaction: { fallbackModels: "deepseek/deepseek-v4-flash" } },
+		});
+		registerKimiCoding(harness);
+		registerDeepseek(harness);
+		registerAnthropic(harness);
+		setContextTokens(harness, 1000);
+
+		const internals = harness.session as unknown as SessionWithKimiCompactionInternals;
+		const anthropicModel = harness.session.modelRegistry.find("anthropic", "claude-sonnet")!;
+		const auth = await internals._resolveCompactionAuth(anthropicModel);
+		expect(auth.model.provider).toBe("deepseek");
+		expect(auth.model.id).toBe("deepseek-v4-flash");
+	});
 });

@@ -13,6 +13,10 @@ export interface CompactionSettings {
 	reserveTokens?: number; // default: 16384
 	keepRecentTokens?: number; // default: 20000
 	agentCallable?: boolean; // default: true - expose the compact skill so the model can request compaction
+	// Ordered compaction summarizers (smallest window first), used only when the
+	// active chat model cannot summarize itself (Claude). Each entry is a
+	// "provider/id" selector; its context window is its token threshold.
+	fallbackModels?: string; // default: "kimi-coding/k3-256k kimi-coding/k3"
 }
 
 export interface BranchSummarySettings {
@@ -870,6 +874,10 @@ export class SettingsManager {
 
 	getCompactionAgentCallable(): boolean {
 		return this.settings.compaction?.agentCallable ?? true;
+	}
+
+	getCompactionFallbackModels(): string {
+		return this.settings.compaction?.fallbackModels?.trim() || "kimi-coding/k3-256k kimi-coding/k3";
 	}
 
 	getCompactionSettings(): { enabled: boolean; reserveTokens: number; keepRecentTokens: number } {
