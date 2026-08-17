@@ -7097,6 +7097,12 @@ export class AgentSession {
 		this._disconnectFromAgent();
 		if (!options.skipAbort) await this.abort();
 		let didCompact = false;
+		// Refine before the summarizer runs, while the context it will discard is
+		// still intact. Manual compaction already refines afterward, so honoring
+		// the same setting here keeps /compact and auto-compaction consistent.
+		// Runs outside the compaction_start/end window so refine events are not
+		// nested inside a compaction the UI shows as in progress.
+		this._refinedBeforeCompaction = await this._refineBeforeCompaction();
 		this._compactionAbortController = new AbortController();
 		let resolveCompactionOperation: () => void = () => {};
 		const compactionOperation = new Promise<void>((resolve) => {
@@ -7167,6 +7173,8 @@ export class AgentSession {
 					hadPostCompactionContinue || this.agent.hasQueuedMessages() || this.unfinishedActionCount > 0,
 				);
 			}
+			// Scoped to this compaction: the next one re-evaluates the setting.
+			this._refinedBeforeCompaction = false;
 		}
 	}
 	/**

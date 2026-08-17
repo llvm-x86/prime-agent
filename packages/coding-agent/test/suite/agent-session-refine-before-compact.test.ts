@@ -154,4 +154,49 @@ describe("refine before auto-compaction", () => {
 
 		expect(order).toEqual(["refine", "compact", "refine", "compact"]);
 	});
+
+	it("refines before the summarizer on a manual /compact", async () => {
+		const order: string[] = [];
+		const { harness, internals } = await createCompactionHarness({ enabled: true, beforeCompact: true }, order);
+		harnesses.push(harness);
+		await harness.session.prompt("one");
+		await harness.session.prompt("two");
+
+		await harness.session.compact();
+
+		// Manual compaction discards the same context an auto one would.
+		expect(order).toEqual(["refine", "compact"]);
+		expect(internals._applyRefine).toHaveBeenCalled();
+	});
+
+	it("skips the post-compaction pass after a manual /compact refined beforehand", async () => {
+		const order: string[] = [];
+		const { harness, internals } = await createCompactionHarness({ enabled: true, beforeCompact: true }, order);
+		harnesses.push(harness);
+		const scheduleAutoRefine = vi.spyOn(internals, "_scheduleAutoRefine");
+		await harness.session.prompt("one");
+		await harness.session.prompt("two");
+
+		await harness.session.compact();
+
+		expect(scheduleAutoRefine).not.toHaveBeenCalledWith("compact");
+		expect(internals._compactAutoRefinePending).toBe(false);
+		// Never latched: a later compaction re-evaluates the setting.
+		expect(internals._refinedBeforeCompaction).toBe(false);
+	});
+
+	it("still refines after a manual /compact by default", async () => {
+		const order: string[] = [];
+		const { harness, internals } = await createCompactionHarness({ enabled: true }, order);
+		harnesses.push(harness);
+		await harness.session.prompt("one");
+		await harness.session.prompt("two");
+
+		await harness.session.compact();
+
+		// Without the opt-in, the pre-pass must not fire and the existing
+		// post-compaction behavior must be untouched.
+		expect(order).toEqual(["compact"]);
+		expect(internals._refinedBeforeCompaction).toBe(false);
+	});
 });

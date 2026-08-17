@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-- Added `autoRefine.beforeCompact` to run harness refinement *before* auto-compaction summarizes the context, so the reviewer still sees the detail compaction is about to discard; it replaces the post-compaction pass for that compaction.
+- Added `autoRefine.beforeCompact` to run harness refinement *before* compaction summarizes the context, so the reviewer still sees the detail compaction is about to discard; it applies to automatic compaction and to `/compact`, and replaces the post-compaction pass for that compaction.
 - Added `--compact-threshold <tokens>` and an "Auto-compact threshold" entry in `/settings` (presets, `off`, or a typed value) to cap context growth by absolute token count instead of only relative to the model's window.
 - Fixed a session dying with "The Prime Agent daemon shut down while this window was attached": a window that rebuilt its daemon connection lost ownership of its own session, so attach failed with "Unknown active session" and the worker was reaped 30 seconds later.
 - Fixed fullscreen wheel scrolling in Ghostty while retaining application link clicks; set `terminal.fullscreenMouse` to `false` to use native Cmd-click instead.
