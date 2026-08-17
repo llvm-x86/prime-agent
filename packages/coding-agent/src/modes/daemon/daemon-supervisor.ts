@@ -222,6 +222,7 @@ const DAEMON_COMMAND_TYPES: ReadonlySet<string> = new Set([
 	"set_steering_mode",
 	"set_follow_up_mode",
 	"set_auto_compaction",
+	"set_compaction_threshold",
 	"set_auto_retry",
 	"compact",
 	"refine",
@@ -1100,6 +1101,25 @@ export class DaemonSupervisor {
 		}
 	}
 
+	/**
+	 * True while any connected client is attached to this worker's root session.
+	 *
+	 * Ownership is keyed on the protocol client id, which a window regenerates
+	 * whenever it rebuilds its connection, so an owner id alone cannot tell a
+	 * departed window from a reconnected one. Attachment can.
+	 */
+	private hasAttachedClient(worker: ResidentWorker): boolean {
+		const sessionIds = [worker.descriptor.rootActiveSessionId, worker.descriptor.rootSessionId].filter(
+			(sessionId): sessionId is string => sessionId !== undefined,
+		);
+		if (sessionIds.length === 0) {
+			return false;
+		}
+		return [...this.clients].some((client) =>
+			sessionIds.some((sessionId) => client.attachedActiveSessionIds.has(sessionId)),
+		);
+	}
+
 	private scheduleOwnedWorkerCleanup(worker: ResidentWorker): void {
 		const ownerClientId = worker.descriptor.ownerClientId;
 		if (
@@ -1116,6 +1136,13 @@ export class DaemonSupervisor {
 				[...this.clients].some((client) => this.protocolClientId(client) === ownerClientId) ||
 				this.workers.get(worker.descriptor.workerId) !== worker
 			) {
+				return;
+			}
+			// A reconnected window owns a fresh protocol client id, so the owner
+			// lookup above misses it. Stopping the worker here would kill a session
+			// out from under an attached client; re-arm and check again later.
+			if (this.hasAttachedClient(worker)) {
+				this.scheduleOwnedWorkerCleanup(worker);
 				return;
 			}
 			void this.stopWorker(worker, true).catch((error) =>

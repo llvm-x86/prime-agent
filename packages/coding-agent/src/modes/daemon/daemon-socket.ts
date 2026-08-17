@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, unlinkSync } from "node:fs";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 
 const DAEMON_SOCKET_MODE = 0o600;
@@ -211,7 +211,23 @@ function assertSocketLease(socketPath: string, lease: DaemonSocketPathLease): vo
 	}
 }
 
+/**
+ * Overrides the runtime directory holding the supervisor socket, worker sockets,
+ * the supervisor ownership registry, and update-restart coordinators.
+ *
+ * Every one of those is shared per uid, so a process that resolves the default
+ * directory joins whatever daemon already lives there. Test suites MUST set this
+ * to a private directory: otherwise a suite run reaches the developer's live
+ * daemon (the default dir follows TMPDIR, so even TMPDIR=/tmp lands on it) and
+ * ownership contention makes that daemon stand down, killing attached sessions.
+ */
+export const DAEMON_SOCKET_DIR_ENV = "PRIME_AGENT_DAEMON_SOCKET_DIR";
+
 export function defaultDaemonSocketDir(): string {
+	const override = process.env[DAEMON_SOCKET_DIR_ENV]?.trim();
+	if (override) {
+		return resolve(override);
+	}
 	const suffix = typeof process.getuid === "function" ? String(process.getuid()) : "user";
 	return join(tmpdir(), `prime-agent-${suffix}`);
 }

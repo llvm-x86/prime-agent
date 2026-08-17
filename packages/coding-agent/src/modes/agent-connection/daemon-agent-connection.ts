@@ -205,11 +205,21 @@ export function buildSessionTreeFromFlatNodes(
 	return roots;
 }
 
+/**
+ * Identifies this window to the supervisor, which keys client-owned worker
+ * ownership on it. A fresh id per connection object would forfeit ownership of
+ * the window's own session whenever the connection is rebuilt (daemon restart,
+ * socket drop), so attach would fail with "Unknown active session" and the
+ * orphaned worker would be reaped. One id per process keeps ownership across
+ * reconnects while keeping separate windows distinct.
+ */
+const PROCESS_CLIENT_ID = `daemon-agent-connection:${randomUUID()}`;
+
 export class DaemonAgentConnection implements AgentConnection {
 	private readonly listeners = new Set<AgentConnectionEventListener>();
 	private readonly unsubscribeDaemonMessages: () => void;
 	private readonly unsubscribeDaemonClose: () => void;
-	private readonly clientId = `daemon-agent-connection:${randomUUID()}`;
+	private readonly clientId = PROCESS_CLIENT_ID;
 	private ownedSessionPromotionTail = Promise.resolve();
 	private lastEventCursor: DaemonEventCursor | undefined;
 	private readonly retiredEventGenerations = new Set<string>();
@@ -1041,6 +1051,10 @@ export class DaemonAgentConnection implements AgentConnection {
 
 	async setAutoCompactionEnabled(enabled: boolean): Promise<void> {
 		await this.requestOk({ type: "set_auto_compaction", activeSessionId: this.activeSessionId, enabled });
+	}
+
+	async setCompactionThresholdTokens(tokens: number | undefined): Promise<void> {
+		await this.requestOk({ type: "set_compaction_threshold", activeSessionId: this.activeSessionId, tokens });
 	}
 
 	async setAutoRetryEnabled(enabled: boolean): Promise<void> {

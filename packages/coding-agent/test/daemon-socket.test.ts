@@ -7,6 +7,7 @@ import lockfile from "proper-lockfile";
 import { describe, expect, it } from "vitest";
 import {
 	cleanupDaemonSocketPath,
+	DAEMON_SOCKET_DIR_ENV,
 	defaultDaemonSocketPath,
 	getDaemonSocketIdentity,
 	prepareDaemonSocketPath,
@@ -21,16 +22,23 @@ describe("defaultDaemonSocketPath", () => {
 		expect(defaultDaemonSocketPath()).toBe("\\\\.\\pipe\\prime-agent-daemon");
 	});
 
-	it("uses a per-user Unix socket directory", () => {
+	it("uses a per-user Unix socket directory when no override is set", () => {
 		if (process.platform === "win32") {
 			return;
 		}
 
 		const suffix = typeof process.getuid === "function" ? String(process.getuid()) : "user";
-		const socketPath = defaultDaemonSocketPath();
-
-		expect(dirname(socketPath)).toBe(join(tmpdir(), `prime-agent-${suffix}`));
-		expect(basename(socketPath)).toBe("daemon.sock");
+		const override = process.env[DAEMON_SOCKET_DIR_ENV];
+		delete process.env[DAEMON_SOCKET_DIR_ENV];
+		try {
+			const socketPath = defaultDaemonSocketPath();
+			expect(dirname(socketPath)).toBe(join(tmpdir(), `prime-agent-${suffix}`));
+			expect(basename(socketPath)).toBe("daemon.sock");
+		} finally {
+			if (override !== undefined) {
+				process.env[DAEMON_SOCKET_DIR_ENV] = override;
+			}
+		}
 	});
 
 	it("checks a live daemon before acquiring the socket path lock", async () => {
