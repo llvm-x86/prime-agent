@@ -11,7 +11,12 @@ import {
 	DAEMON_SCHEMA_ID,
 	type DaemonRuntimeIdentity,
 } from "../modes/daemon/daemon-protocol.js";
-import { defaultDaemonSocketDir, defaultDaemonSocketPath } from "../modes/daemon/daemon-socket.js";
+import {
+	DAEMON_SOCKET_DIR_ENV,
+	defaultDaemonSocketDir,
+	defaultDaemonSocketPath,
+	sharedDaemonSocketDir,
+} from "../modes/daemon/daemon-socket.js";
 import { acquireDaemonShutdownAdmission } from "../modes/daemon/daemon-supervisor-ownership.js";
 import type { DaemonWorkerDescriptor } from "../modes/daemon/daemon-worker-protocol.js";
 import { signalProcessGroupOrProcess } from "../utils/child-process.js";
@@ -174,13 +179,37 @@ export function parsePsEtimes(stdout: string): Map<number, number> {
 	return uptimes;
 }
 
+// Discovery is a machine-wide process scan: it finds every prime-agent daemon
+// regardless of runtime directory. That breadth is load-bearing — daemons on
+// arbitrary `--daemon-socket` paths are only findable this way — so it must not
+// be narrowed to one directory. What it must never do is reach *out* of a private
+// runtime: a process that overrode the socket directory (notably the test suite)
+// has declared its own runtime, and killing daemons in the shared per-uid
+// directory from there destroys the developer's live, attached sessions.
+function withheldDiscoveryDir(): string | undefined {
+	const override = process.env[DAEMON_SOCKET_DIR_ENV]?.trim();
+	if (!override) {
+		return undefined;
+	}
+	const shared = sharedDaemonSocketDir();
+	return resolve(override) === shared ? undefined : shared;
+}
+
+export function withinDiscoveryScope<T extends { socketPath: string }>(daemons: readonly T[]): T[] {
+	const withheld = withheldDiscoveryDir();
+	if (!withheld) {
+		return [...daemons];
+	}
+	return daemons.filter((daemon) => dirname(normalizeSocketPath(daemon.socketPath)) !== withheld);
+}
+
 function scanListeningDaemons(): DiscoveredDaemonProcess[] {
 	if (process.platform === "win32") {
 		return [];
 	}
 	const ss = spawnSync("ss", ["-lxp"], { encoding: "utf8" });
 	if (!ss.error && ss.status === 0 && typeof ss.stdout === "string") {
-		return enrichUptimes(parseSsListeners(ss.stdout, APP_NAME));
+		return withinDiscoveryScope(enrichUptimes(parseSsListeners(ss.stdout, APP_NAME)));
 	}
 	const lsof = spawnSync("lsof", ["-nP", "-F", "pn", "-U", "-a", "-c", APP_NAME], { encoding: "utf8" });
 	const byName = !lsof.error && typeof lsof.stdout === "string" ? parseLsofListeners(lsof.stdout) : [];
@@ -197,7 +226,7 @@ function scanListeningDaemons(): DiscoveredDaemonProcess[] {
 			}
 		}
 	}
-	return enrichUptimes(mergeDiscoveredDaemonProcesses(byName, byPid));
+	return withinDiscoveryScope(enrichUptimes(mergeDiscoveredDaemonProcesses(byName, byPid)));
 }
 
 function isDaemonProcessListening(pid: number, socketPath: string): boolean {

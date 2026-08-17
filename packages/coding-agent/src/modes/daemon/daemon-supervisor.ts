@@ -1982,12 +1982,18 @@ export class DaemonSupervisor {
 					(command.includeClientOwned === true && this.isWorkerAccessibleToClient(client, worker)),
 			)
 			.flatMap((worker) => [...worker.summaries.values()].map((summary) => this.publicSummary(worker, summary)));
-		const busyClientOwnedSessionCount = clientOwnedWorkers
-			.flatMap((worker) => [...worker.summaries.values()])
-			.filter(isSessionSummaryBusy).length;
+		const clientOwnedSessions = clientOwnedWorkers.flatMap((worker) => [...worker.summaries.values()]);
+		const busyClientOwnedSessionCount = clientOwnedSessions.filter(isSessionSummaryBusy).length;
+		// Client-owned workers are invisible to other processes, so their attachment
+		// cannot be read off the summaries above. Report it as an aggregate: a
+		// window attached to an idle session is still destroyed by a replacement,
+		// and unlike a detached session it does not silently reload from disk.
+		const attachedClientOwnedSessionCount = clientOwnedWorkers.filter((worker) =>
+			this.hasAttachedClient(worker),
+		).length;
 		const data = {
 			sessions: active,
-			...(command.includeClientOwned ? { busyClientOwnedSessionCount } : {}),
+			...(command.includeClientOwned ? { busyClientOwnedSessionCount, attachedClientOwnedSessionCount } : {}),
 		};
 		if (!command.all) {
 			return success(command.id, "list", data);

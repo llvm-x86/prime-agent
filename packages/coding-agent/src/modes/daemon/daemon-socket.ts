@@ -223,13 +223,22 @@ function assertSocketLease(socketPath: string, lease: DaemonSocketPathLease): vo
  */
 export const DAEMON_SOCKET_DIR_ENV = "PRIME_AGENT_DAEMON_SOCKET_DIR";
 
+/**
+ * The per-uid runtime directory every un-overridden process shares. Exposed so
+ * discovery can refuse to act on it from a process that declared a private
+ * runtime directory.
+ */
+export function sharedDaemonSocketDir(): string {
+	const suffix = typeof process.getuid === "function" ? String(process.getuid()) : "user";
+	return join(tmpdir(), `prime-agent-${suffix}`);
+}
+
 export function defaultDaemonSocketDir(): string {
 	const override = process.env[DAEMON_SOCKET_DIR_ENV]?.trim();
 	if (override) {
 		return resolve(override);
 	}
-	const suffix = typeof process.getuid === "function" ? String(process.getuid()) : "user";
-	return join(tmpdir(), `prime-agent-${suffix}`);
+	return sharedDaemonSocketDir();
 }
 
 function ensureDefaultDaemonSocketDir(socketPath: string): void {

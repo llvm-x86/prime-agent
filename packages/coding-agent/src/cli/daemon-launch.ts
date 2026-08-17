@@ -118,7 +118,11 @@ export async function listActiveDaemonSessionSummaries(
 async function queryActiveDaemonSessions(
 	client: DaemonClient,
 	options: { includeClientOwned?: boolean } = {},
-): Promise<{ sessions: SessionSummary[]; busyClientOwnedSessionCount: number }> {
+): Promise<{
+	sessions: SessionSummary[];
+	busyClientOwnedSessionCount: number;
+	attachedClientOwnedSessionCount: number;
+}> {
 	const response = await client.request({ type: "list", includeClientOwned: options.includeClientOwned });
 	if (!response.success) {
 		throw new Error(response.error);
@@ -143,7 +147,23 @@ async function queryActiveDaemonSessions(
 	) {
 		throw new Error("Daemon returned an invalid client-owned session count");
 	}
-	return { sessions, busyClientOwnedSessionCount: busyClientOwnedSessionCount ?? 0 };
+	const attachedClientOwnedSessionCount = (data as { attachedClientOwnedSessionCount?: unknown })
+		.attachedClientOwnedSessionCount;
+	if (
+		attachedClientOwnedSessionCount !== undefined &&
+		(typeof attachedClientOwnedSessionCount !== "number" ||
+			!Number.isInteger(attachedClientOwnedSessionCount) ||
+			attachedClientOwnedSessionCount < 0)
+	) {
+		throw new Error("Daemon returned an invalid attached client-owned session count");
+	}
+	return {
+		sessions,
+		busyClientOwnedSessionCount: busyClientOwnedSessionCount ?? 0,
+		// Daemons predating this field report nothing; visible summaries still
+		// carry per-session attachment, so absence degrades to the old behavior.
+		attachedClientOwnedSessionCount: attachedClientOwnedSessionCount ?? 0,
+	};
 }
 
 /** Thrown when a stale-version daemon can't be replaced. The message is user-facing. */
@@ -299,12 +319,15 @@ export async function probeRunningDaemonSessions(socketPath: string): Promise<Ru
 	}
 }
 
-// Idle-but-loaded sessions reload from disk on the fresh daemon, so only a busy
-// session blocks replacing a stale daemon.
+// A detached idle session reloads from disk on the fresh daemon, so idleness alone
+// does not protect it. An *attached* window is different: replacing its daemon
+// destroys the window with "the daemon shut down while this window was attached",
+// and no reload brings it back. Refuse on either busy work or a live attachment.
 async function shutdownStaleDaemonIfNotBusy(socketPath: string): Promise<boolean> {
 	const client = new DaemonClient(socketPath);
 	let connected = false;
 	let hasBusySessions = false;
+	let hasAttachedSessions = false;
 	let loadedSessionCount = 0;
 	try {
 		await client.connect(1000);
@@ -314,6 +337,9 @@ async function shutdownStaleDaemonIfNotBusy(socketPath: string): Promise<boolean
 			loadedSessionCount = result.sessions.length;
 			hasBusySessions =
 				result.busyClientOwnedSessionCount !== 0 || result.sessions.some((summary) => isSessionBusy(summary));
+			hasAttachedSessions =
+				result.attachedClientOwnedSessionCount !== 0 ||
+				result.sessions.some((summary) => (summary.attachedClients ?? 0) > 0);
 		} catch {
 			// Couldn't confirm idleness: treat as busy rather than risk interrupting work.
 			hasBusySessions = true;
@@ -329,6 +355,10 @@ async function shutdownStaleDaemonIfNotBusy(socketPath: string): Promise<boolean
 	}
 	if (hasBusySessions) {
 		logDaemonLaunch(`refusing to replace stale daemon on ${socketPath}: busy session(s) present`);
+		return false;
+	}
+	if (hasAttachedSessions) {
+		logDaemonLaunch(`refusing to replace stale daemon on ${socketPath}: session(s) have an attached window`);
 		return false;
 	}
 	logDaemonLaunch(

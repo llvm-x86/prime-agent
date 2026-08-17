@@ -465,6 +465,15 @@ describe("daemon supervisor resident workers", () => {
 		});
 		await expect(connection.listHeartbeats()).resolves.toEqual([]);
 		await expect(connection.listCronJobs()).resolves.toEqual([]);
+		// A foreign process cannot see this client-owned session, so the aggregate is
+		// the only signal that killing this daemon would destroy an attached window.
+		const probeClient = await connectEventually(socketPath);
+		const probeList = await probeClient.request({ type: "list", includeClientOwned: true });
+		expect(probeList).toMatchObject({
+			success: true,
+			data: { sessions: [], busyClientOwnedSessionCount: 0, attachedClientOwnedSessionCount: 1 },
+		});
+		probeClient.close();
 		const cronResponse = await client.request({
 			type: "cron_add",
 			activeSessionId: summary.activeSessionId,

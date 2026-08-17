@@ -18,6 +18,7 @@ interface FakeDaemonOptions {
 	/** Sessions returned for a `list` command. */
 	sessions?: Array<Record<string, unknown>>;
 	busyClientOwnedSessionCount?: number;
+	attachedClientOwnedSessionCount?: number;
 	/** When true, the `list` command responds with a failure. */
 	failList?: boolean;
 	/** When false, the server ignores `shutdown` and stays up. */
@@ -82,6 +83,9 @@ async function startFakeDaemon(options: FakeDaemonOptions = {}): Promise<FakeDae
 									data: {
 										sessions: options.sessions ?? [],
 										busyClientOwnedSessionCount: options.busyClientOwnedSessionCount ?? 0,
+										...(options.attachedClientOwnedSessionCount === undefined
+											? {}
+											: { attachedClientOwnedSessionCount: options.attachedClientOwnedSessionCount }),
 									},
 								}),
 					});
@@ -257,6 +261,56 @@ describe("ensureInteractiveDaemonRunning", () => {
 		await expect(ensureInteractiveDaemonRunning(daemon.socketPath)).rejects.toThrow("stale");
 		expect(commands).toContain("list");
 		expect(commands).not.toContain("shutdown");
+	});
+
+	it("does not replace a stale daemon whose private client session has an attached window", async () => {
+		const commands: string[] = [];
+		const daemon = await startFakeDaemon({
+			protocolVersion: DAEMON_PROTOCOL_VERSION,
+			appVersion: VERSION,
+			schemaId: "stale-schema",
+			busyClientOwnedSessionCount: 0,
+			attachedClientOwnedSessionCount: 1,
+			onCommand: (command) => commands.push(command.type),
+		});
+		cleanups.push(daemon.close);
+
+		await expect(ensureInteractiveDaemonRunning(daemon.socketPath)).rejects.toThrow("stale");
+		expect(commands).toContain("list");
+		expect(commands).not.toContain("shutdown");
+	});
+
+	it("does not replace a stale daemon whose visible idle session has an attached window", async () => {
+		const commands: string[] = [];
+		const daemon = await startFakeDaemon({
+			protocolVersion: DAEMON_PROTOCOL_VERSION,
+			appVersion: VERSION,
+			schemaId: "stale-schema",
+			sessions: [{ id: "idle-1", activeSessionId: "idle-1", isStreaming: false, attachedClients: 1 }],
+			onCommand: (command) => commands.push(command.type),
+		});
+		cleanups.push(daemon.close);
+
+		await expect(ensureInteractiveDaemonRunning(daemon.socketPath)).rejects.toThrow("stale");
+		expect(commands).toContain("list");
+		expect(commands).not.toContain("shutdown");
+	});
+
+	it("still replaces a stale daemon whose idle sessions have no attached window", async () => {
+		const commands: string[] = [];
+		const daemon = await startFakeDaemon({
+			protocolVersion: DAEMON_PROTOCOL_VERSION,
+			appVersion: VERSION,
+			schemaId: "stale-schema",
+			sessions: [{ id: "idle-1", activeSessionId: "idle-1", isStreaming: false, attachedClients: 0 }],
+			attachedClientOwnedSessionCount: 0,
+			onCommand: (command) => commands.push(command.type),
+		});
+		cleanups.push(daemon.close);
+
+		await ensureInteractiveDaemonRunning(daemon.socketPath).catch(() => undefined);
+		expect(commands).toContain("list");
+		expect(commands).toContain("shutdown");
 	});
 
 	it("does not treat a live daemon as absent when cold startup delays the first connection", async () => {
