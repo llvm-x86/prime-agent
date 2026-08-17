@@ -71,6 +71,8 @@ export interface AgentSessionCreationOptions {
 	allowedToolNames?: string[];
 	includeGoals?: boolean;
 	includeCompactSkill?: boolean;
+	/** Session-scoped auto-compaction token threshold (CLI --compact-threshold). */
+	compactionThresholdTokens?: number;
 	agentMessageController?: AgentSessionMessageController;
 	agentObserveController?: AgentObserveController;
 	rlmDepth?: number;
@@ -288,6 +290,7 @@ export async function createAgentSessionFromServices(
 		allowedToolNames: options.allowedToolNames,
 		includeGoals: options.includeGoals,
 		includeCompactSkill: options.includeCompactSkill,
+		compactionThresholdTokens: options.compactionThresholdTokens,
 		agentMessageController: options.agentMessageController,
 		agentObserveController: options.agentObserveController,
 		rlmDepth: options.rlmDepth,

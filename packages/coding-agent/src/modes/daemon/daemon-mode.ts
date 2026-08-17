@@ -303,6 +303,7 @@ const DAEMON_COMMAND_TYPES: ReadonlySet<string> = new Set([
 	"set_steering_mode",
 	"set_follow_up_mode",
 	"set_auto_compaction",
+	"set_compaction_threshold",
 	"set_auto_retry",
 	"compact",
 	"refine",
@@ -4456,6 +4457,12 @@ export class AgentDaemon {
 				const state = this.getSessionState(command.activeSessionId);
 				state.runtime.session.setAutoCompactionEnabled(command.enabled);
 				return success(command.id, "set_auto_compaction");
+			}
+
+			case "set_compaction_threshold": {
+				const state = this.getSessionState(command.activeSessionId);
+				state.runtime.session.setCompactionThresholdTokens(command.tokens);
+				return success(command.id, "set_compaction_threshold");
 			}
 
 			case "set_auto_retry": {

@@ -668,6 +668,126 @@ describe("AgentSession compaction characterization", () => {
 
 		expect(runAutoCompactionSpy).toHaveBeenCalledWith("threshold", false);
 	});
+	it("triggers threshold compaction at the session-scoped --compact-threshold", async () => {
+		const harness = await createHarness({
+			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
+			models: [{ id: "faux-1", contextWindow: 200_000 }],
+			compactionThresholdTokens: 40_000,
+		});
+		harnesses.push(harness);
+		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
+		// 50k is far below the window-relative trigger (>199k) but above the override.
+		const assistant = createAssistant(harness, {
+			stopReason: "stop",
+			totalTokens: 50_000,
+			timestamp: Date.now(),
+		});
+		harness.session.agent.state.messages = [
+			{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: Date.now() - 1000 },
+			assistant,
+		];
+
+		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue();
+
+		await sessionInternals._checkCompaction(assistant, false);
+
+		expect(runAutoCompactionSpy).toHaveBeenCalledWith("threshold", false);
+	});
+
+	it("does not trigger threshold compaction at the same usage without the override", async () => {
+		const harness = await createHarness({
+			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
+			models: [{ id: "faux-1", contextWindow: 200_000 }],
+		});
+		harnesses.push(harness);
+		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
+		const assistant = createAssistant(harness, {
+			stopReason: "stop",
+			totalTokens: 50_000,
+			timestamp: Date.now(),
+		});
+		harness.session.agent.state.messages = [
+			{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: Date.now() - 1000 },
+			assistant,
+		];
+
+		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue();
+
+		await sessionInternals._checkCompaction(assistant, false);
+
+		expect(runAutoCompactionSpy).not.toHaveBeenCalled();
+	});
+
+	it("honors compaction.thresholdTokens from settings when no CLI override is set", async () => {
+		const harness = await createHarness({
+			settings: { compaction: { enabled: true, reserveTokens: 1000, thresholdTokens: 40_000 } },
+			models: [{ id: "faux-1", contextWindow: 200_000 }],
+		});
+		harnesses.push(harness);
+		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
+		const assistant = createAssistant(harness, {
+			stopReason: "stop",
+			totalTokens: 50_000,
+			timestamp: Date.now(),
+		});
+		harness.session.agent.state.messages = [
+			{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: Date.now() - 1000 },
+			assistant,
+		];
+
+		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue();
+
+		await sessionInternals._checkCompaction(assistant, false);
+
+		expect(runAutoCompactionSpy).toHaveBeenCalledWith("threshold", false);
+	});
+
+	it("lets an explicit threshold change override and outlive the --compact-threshold flag", async () => {
+		const harness = await createHarness({
+			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
+			models: [{ id: "faux-1", contextWindow: 200_000 }],
+			compactionThresholdTokens: 40_000,
+		});
+		harnesses.push(harness);
+		expect(harness.session.compactionThresholdTokens).toBe(40_000);
+
+		// The /settings edit persists the new ceiling and drops the CLI override,
+		// which would otherwise keep shadowing the value the user just picked.
+		harness.session.setCompactionThresholdTokens(120_000);
+		expect(harness.session.compactionThresholdTokens).toBe(120_000);
+		expect(harness.session.settingsManager.getCompactionThresholdTokens()).toBe(120_000);
+
+		// "off" clears the ceiling and restores the window-relative rule.
+		harness.session.setCompactionThresholdTokens(undefined);
+		expect(harness.session.compactionThresholdTokens).toBeUndefined();
+		expect(harness.session.settingsManager.getCompactionThresholdTokens()).toBeUndefined();
+	});
+
+	it("stops threshold compaction from firing once the ceiling is cleared", async () => {
+		const harness = await createHarness({
+			settings: { compaction: { enabled: true, reserveTokens: 1000 } },
+			models: [{ id: "faux-1", contextWindow: 200_000 }],
+			compactionThresholdTokens: 40_000,
+		});
+		harnesses.push(harness);
+		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
+		const assistant = createAssistant(harness, {
+			stopReason: "stop",
+			totalTokens: 50_000,
+			timestamp: Date.now(),
+		});
+		harness.session.agent.state.messages = [
+			{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: Date.now() - 1000 },
+			assistant,
+		];
+		harness.session.setCompactionThresholdTokens(undefined);
+
+		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue();
+
+		await sessionInternals._checkCompaction(assistant, false);
+
+		expect(runAutoCompactionSpy).not.toHaveBeenCalled();
+	});
 
 	it("stops a tool loop for threshold compaction before the next model call", async () => {
 		const harness = await createHarness({

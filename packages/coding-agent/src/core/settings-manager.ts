@@ -12,6 +12,9 @@ export interface CompactionSettings {
 	enabled?: boolean; // default: true
 	reserveTokens?: number; // default: 16384
 	keepRecentTokens?: number; // default: 20000
+	// Absolute context-token ceiling that triggers auto-compaction. Overrides the
+	// default "contextWindow - reserveTokens" rule when set.
+	thresholdTokens?: number; // default: unset (window-relative)
 	agentCallable?: boolean; // default: true - expose the compact skill so the model can request compaction
 	// Ordered compaction summarizers (smallest window first), used only when the
 	// active chat model cannot summarize itself (Claude). Each entry is a
@@ -872,6 +875,29 @@ export class SettingsManager {
 		return this.settings.compaction?.keepRecentTokens ?? 20000;
 	}
 
+	/** Absolute auto-compaction ceiling; undefined means window-relative. */
+	getCompactionThresholdTokens(): number | undefined {
+		const threshold = this.settings.compaction?.thresholdTokens;
+		return typeof threshold === "number" && threshold > 0 ? threshold : undefined;
+	}
+
+	/**
+	 * Persist the absolute auto-compaction ceiling. `undefined` clears it, which
+	 * restores the window-relative (`contextWindow - reserveTokens`) rule.
+	 */
+	setCompactionThresholdTokens(tokens: number | undefined): void {
+		if (!this.globalSettings.compaction) {
+			this.globalSettings.compaction = {};
+		}
+		if (tokens === undefined || !Number.isFinite(tokens) || tokens <= 0) {
+			delete this.globalSettings.compaction.thresholdTokens;
+		} else {
+			this.globalSettings.compaction.thresholdTokens = Math.floor(tokens);
+		}
+		this.markModified("compaction", "thresholdTokens");
+		this.save();
+	}
+
 	getCompactionAgentCallable(): boolean {
 		return this.settings.compaction?.agentCallable ?? true;
 	}
@@ -880,11 +906,17 @@ export class SettingsManager {
 		return this.settings.compaction?.fallbackModels?.trim() || "kimi-coding/k3-256k kimi-coding/k3";
 	}
 
-	getCompactionSettings(): { enabled: boolean; reserveTokens: number; keepRecentTokens: number } {
+	getCompactionSettings(): {
+		enabled: boolean;
+		reserveTokens: number;
+		keepRecentTokens: number;
+		thresholdTokens?: number;
+	} {
 		return {
 			enabled: this.getCompactionEnabled(),
 			reserveTokens: this.getCompactionReserveTokens(),
 			keepRecentTokens: this.getCompactionKeepRecentTokens(),
+			thresholdTokens: this.getCompactionThresholdTokens(),
 		};
 	}
 

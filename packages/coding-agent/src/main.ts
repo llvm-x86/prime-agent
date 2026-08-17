@@ -673,6 +673,7 @@ function runtimeConfigFromArgs(
 		// instead of its own appMode="daemon".
 		serializedRefine: appMode !== "interactive" && appMode !== "daemon",
 		initialGoal: parsed.goal ? { objective: parsed.goal, tokenBudget: parsed.goalTokenBudget } : undefined,
+		compactionThresholdTokens: parsed.compactThreshold,
 	};
 }
 
@@ -685,7 +686,7 @@ interface PreparedRuntimeServices {
 }
 
 export function daemonServerDefaultSessionConfig(config: AgentSessionRuntimeConfig): AgentSessionRuntimeConfig {
-	return { ...config, initialGoal: undefined };
+	return { ...config, initialGoal: undefined, compactionThresholdTokens: undefined };
 }
 
 export function resolveRuntimeSessionOptions(
@@ -1297,6 +1298,10 @@ export async function main(args: string[], options?: MainOptions) {
 			telemetryDisabled: config.telemetryDisabled,
 			// Only seed initial goal for top-level sessions (rlmDepth 0).
 			initialGoal: (runtimeSessionOptions?.rlmDepth ?? 0) === 0 ? config.initialGoal : undefined,
+			// Session-scoped auto-compaction threshold applies to the terminal
+			// session the flag was passed to, not to spawned subagents.
+			compactionThresholdTokens:
+				(runtimeSessionOptions?.rlmDepth ?? 0) === 0 ? config.compactionThresholdTokens : undefined,
 		});
 		const cliThinkingOverride = config.thinking !== undefined || prepared.cliThinkingFromModel;
 		if (created.session.model && cliThinkingOverride) {

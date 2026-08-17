@@ -383,6 +383,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		allowedToolNames,
 		includeGoals,
 		includeCompactSkill: options.includeCompactSkill,
+		compactionThresholdTokens: options.compactionThresholdTokens,
 		rlmHeartbeatController: options.rlmHeartbeatController,
 		agentMessageController: options.agentMessageController,
 		agentObserveController: options.agentObserveController,

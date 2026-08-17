@@ -49,6 +49,7 @@ export interface Args {
 	autonomousTimeoutMs?: number;
 	goal?: string;
 	goalTokenBudget?: number;
+	compactThreshold?: number;
 	listModels?: string | true;
 	offline?: boolean;
 	verbose?: boolean;
@@ -271,6 +272,10 @@ export function parseArgs(args: string[]): Args {
 		} else if (arg === "--goal-token-budget") {
 			if (hasRequiredOptionValue(args, i, arg, result)) {
 				result.goalTokenBudget = parsePositiveInt(args[++i], "--goal-token-budget", result);
+			}
+		} else if (arg === "--compact-threshold") {
+			if (hasRequiredOptionValue(args, i, arg, result)) {
+				result.compactThreshold = parsePositiveInt(args[++i], "--compact-threshold", result);
 			}
 		} else if (arg === "--list-models") {
 			const hasSearch = i + 1 < args.length && !args[i + 1].startsWith("-") && !args[i + 1].startsWith("@");

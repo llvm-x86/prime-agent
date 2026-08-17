@@ -54,6 +54,7 @@ export type RpcCommand =
 	| { id?: string; type: "compact"; customInstructions?: string }
 	| { id?: string; type: "refine"; instructions?: string; rollbackId?: string; global?: boolean }
 	| { id?: string; type: "set_auto_compaction"; enabled: boolean }
+	| { id?: string; type: "set_compaction_threshold"; tokens?: number }
 
 	// Retry
 	| { id?: string; type: "set_auto_retry"; enabled: boolean }
@@ -146,6 +147,7 @@ export interface RpcSessionState {
 	sessionId: string;
 	sessionName?: string;
 	autoCompactionEnabled: boolean;
+	compactionThresholdTokens?: number;
 	messageCount: number;
 	sessionActions: SessionActionSnapshot;
 	goal: GoalState;
@@ -208,6 +210,7 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "compact"; success: true; data: CompactionResult }
 	| { id?: string; type: "response"; command: "refine"; success: true; data: RefinementResult }
 	| { id?: string; type: "response"; command: "set_auto_compaction"; success: true }
+	| { id?: string; type: "response"; command: "set_compaction_threshold"; success: true }
 
 	// Retry
 	| { id?: string; type: "response"; command: "set_auto_retry"; success: true }

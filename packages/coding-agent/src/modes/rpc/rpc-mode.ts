@@ -255,6 +255,7 @@ async function runRpcModeWithConnectionInternal(
 					sessionId: state.sessionId,
 					sessionName: state.sessionName,
 					autoCompactionEnabled: state.autoCompactionEnabled,
+					compactionThresholdTokens: state.compactionThresholdTokens,
 					messageCount: state.messageCount,
 					sessionActions: state.sessionActions,
 					goal: state.goal,
@@ -294,6 +295,9 @@ async function runRpcModeWithConnectionInternal(
 				);
 			case "set_auto_compaction":
 				await connection.setAutoCompactionEnabled(command.enabled);
+				return success(id, command.type);
+			case "set_compaction_threshold":
+				await connection.setCompactionThresholdTokens(command.tokens);
 				return success(id, command.type);
 			case "set_auto_retry":
 				await connection.setAutoRetryEnabled(command.enabled);

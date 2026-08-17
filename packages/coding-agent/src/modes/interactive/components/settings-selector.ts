@@ -2,6 +2,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Transport } from "@earendil-works/pi-ai";
 import {
 	Container,
+	Input,
 	type SelectItem,
 	SelectList,
 	type SelectListLayoutOptions,
@@ -33,6 +34,8 @@ const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 export interface SettingsConfig {
 	autoCompact: boolean;
 	idleEvictionMinutes: IdleEvictionMinutes;
+	/** Absolute auto-compaction ceiling in tokens; undefined means window-relative. */
+	compactionThresholdTokens?: number;
 	showImages: boolean;
 	autoResizeImages: boolean;
 	blockImages: boolean;
@@ -60,6 +63,7 @@ export interface SettingsConfig {
 export interface SettingsCallbacks {
 	onAutoCompactChange: (enabled: boolean) => void;
 	onIdleEvictionMinutesChange: (value: IdleEvictionMinutes) => void;
+	onCompactionThresholdTokensChange: (tokens: number | undefined) => void;
 	onShowImagesChange: (enabled: boolean) => void;
 	onAutoResizeImagesChange: (enabled: boolean) => void;
 	onBlockImagesChange: (blocked: boolean) => void;
@@ -193,6 +197,114 @@ class SelectSubmenu extends Container {
 	}
 }
 
+const CUSTOM_THRESHOLD_VALUE = "custom";
+
+/**
+ * Submenu for the absolute auto-compaction ceiling: pick a preset, turn it off,
+ * or type an exact token count.
+ */
+class CompactionThresholdSubmenu extends Container {
+	private selectList: SelectList;
+	private input?: Input;
+	private error?: Text;
+
+	constructor(
+		presets: number[],
+		currentValue: string,
+		private readonly onSelect: (value: string) => void,
+		private readonly onCancel: () => void,
+	) {
+		super();
+
+		const options: SelectItem[] = [
+			{ value: "off", label: "off", description: "Compact when context nears the model's window" },
+			...presets.map((preset) => ({
+				value: String(preset),
+				label: preset.toLocaleString("en-US"),
+				description: `Compact once context exceeds ${preset.toLocaleString("en-US")} tokens`,
+			})),
+			{ value: CUSTOM_THRESHOLD_VALUE, label: "Custom…", description: "Type an exact token count" },
+		];
+
+		this.addChild(new Text(theme.bold(theme.fg("accent", "Auto-compact threshold")), 0, 0));
+		this.addChild(new Spacer(1));
+		this.selectList = new SelectList(
+			options,
+			Math.min(options.length, 10),
+			getSelectListTheme(),
+			SETTINGS_SUBMENU_SELECT_LIST_LAYOUT,
+		);
+		const currentIndex = options.findIndex((option) => option.value === currentValue);
+		if (currentIndex !== -1) this.selectList.setSelectedIndex(currentIndex);
+		this.selectList.onSelect = (item) => {
+			if (item.value === CUSTOM_THRESHOLD_VALUE) {
+				this.showCustomInput(currentValue);
+				return;
+			}
+			this.onSelect(item.value);
+		};
+		this.selectList.onCancel = () => this.onCancel();
+		this.addChild(this.selectList);
+		this.addChild(new Spacer(1));
+		this.addChild(new Text(theme.fg("dim", "  Enter to select · esc to go back"), 0, 0));
+	}
+
+	private showCustomInput(currentValue: string): void {
+		this.clear();
+		const current = currentValue === CUSTOM_THRESHOLD_VALUE || currentValue === "off" ? "off" : currentValue;
+		this.addChild(new Text(theme.bold(theme.fg("accent", "Auto-compact threshold")), 0, 0));
+		this.addChild(new Spacer(1));
+		this.addChild(
+			new Text(
+				theme.fg("muted", `Token count to compact above, or 'off' for window-relative. Now: ${current}`),
+				0,
+				0,
+			),
+		);
+		this.addChild(new Spacer(1));
+		// Deliberately not prefilled: Input starts its cursor at offset 0, so a
+		// prefilled value would have typed digits spliced in front of it.
+		const input = new Input();
+		input.focused = true;
+		input.onSubmit = (value) => this.submitCustom(value);
+		input.onEscape = () => this.onCancel();
+		this.input = input;
+		this.addChild(input);
+		this.error = new Text("", 0, 0);
+		this.addChild(this.error);
+		this.addChild(new Text(theme.fg("dim", "  Enter to apply · esc to go back"), 0, 0));
+	}
+
+	private submitCustom(raw: string): void {
+		const trimmed = raw.trim();
+		// Empty submit is a no-op rather than a silent "off": clearing the ceiling
+		// is an explicit choice, and the list already has an "off" entry for it.
+		if (trimmed === "") {
+			this.onCancel();
+			return;
+		}
+		if (trimmed.toLowerCase() === "off") {
+			this.onSelect("off");
+			return;
+		}
+		// Accept grouped digits ("120,000" / "120 000") since the list renders them grouped.
+		const tokens = Number(trimmed.replace(/[,\s_]/g, ""));
+		if (!Number.isInteger(tokens) || tokens <= 0) {
+			this.error?.setText(theme.fg("error", "  Enter a positive whole number of tokens, or 'off'."));
+			return;
+		}
+		this.onSelect(String(tokens));
+	}
+
+	handleInput(data: string): void {
+		if (this.input) {
+			this.input.handleInput(data);
+			return;
+		}
+		this.selectList.handleInput(data);
+	}
+}
+
 /**
  * Main settings selector component.
  */
@@ -209,6 +321,13 @@ export class SettingsSelectorComponent extends Container {
 			idleEvictionValues.sort((a, b) => a - b);
 		}
 
+		const compactThresholdValues = [40_000, 80_000, 120_000, 160_000, 200_000];
+		const currentCompactThreshold = config.compactionThresholdTokens;
+		if (typeof currentCompactThreshold === "number" && !compactThresholdValues.includes(currentCompactThreshold)) {
+			compactThresholdValues.push(currentCompactThreshold);
+			compactThresholdValues.sort((a, b) => a - b);
+		}
+
 		const items: SettingItem[] = [
 			{
 				id: "autocompact",
@@ -216,6 +335,20 @@ export class SettingsSelectorComponent extends Container {
 				description: "Automatically compact context when it gets too large",
 				currentValue: config.autoCompact ? "true" : "false",
 				values: ["true", "false"],
+			},
+			{
+				id: "compact-threshold",
+				label: "Auto-compact threshold",
+				description:
+					"Compact once context exceeds this many tokens. 'off' compacts when context nears the model's window instead.",
+				currentValue: currentCompactThreshold === undefined ? "off" : String(currentCompactThreshold),
+				submenu: (currentValue, done) =>
+					new CompactionThresholdSubmenu(
+						compactThresholdValues,
+						currentValue,
+						(value) => done(value),
+						() => done(undefined),
+					),
 			},
 			{
 				id: "idle-eviction-minutes",
@@ -454,6 +587,9 @@ export class SettingsSelectorComponent extends Container {
 				switch (id) {
 					case "autocompact":
 						callbacks.onAutoCompactChange(newValue === "true");
+						break;
+					case "compact-threshold":
+						callbacks.onCompactionThresholdTokensChange(newValue === "off" ? undefined : Number(newValue));
 						break;
 					case "idle-eviction-minutes":
 						callbacks.onIdleEvictionMinutesChange(newValue === "off" ? "off" : Number(newValue));

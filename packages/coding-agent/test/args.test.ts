@@ -670,4 +670,37 @@ describe("parseArgs", () => {
 			});
 		});
 	});
+
+	describe("--compact-threshold", () => {
+		test("parses a positive integer", () => {
+			const result = parseArgs(["--compact-threshold", "50000"]);
+			expect(result.compactThreshold).toBe(50000);
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test("rejects a non-positive value", () => {
+			const result = parseArgs(["--compact-threshold", "0"]);
+			expect(result.compactThreshold).toBeUndefined();
+			expect(result.diagnostics).toContainEqual({
+				type: "error",
+				message: "--compact-threshold must be a positive integer",
+			});
+		});
+
+		test("trailing flag without a value produces an error", () => {
+			const result = parseArgs(["--compact-threshold"]);
+			expect(result.compactThreshold).toBeUndefined();
+			expect(result.diagnostics).toContainEqual({
+				type: "error",
+				message: "--compact-threshold requires a value",
+			});
+		});
+
+		test("does not require any other flag", () => {
+			const result = parseArgs(["--compact-threshold", "120000", "hello"]);
+			expect(result.compactThreshold).toBe(120000);
+			expect(result.messages).toEqual(["hello"]);
+			expect(result.diagnostics).toEqual([]);
+		});
+	});
 });

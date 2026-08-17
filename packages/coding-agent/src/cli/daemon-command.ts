@@ -565,6 +565,17 @@ function parseSessionOption(
 			// Session-specific flag: do NOT propagate to daemon startup args.
 			return { consumed: 1 };
 		}
+		case "--compact-threshold": {
+			const value = readValue(arg);
+			const threshold = Number(value);
+			if (!Number.isInteger(threshold) || threshold <= 0) {
+				throw new Error("--compact-threshold must be a positive integer");
+			}
+			config.compactionThresholdTokens = threshold;
+			// Session-specific flag: do NOT propagate to daemon startup args, so a
+			// later create without the flag is not contaminated.
+			return { consumed: 1 };
+		}
 		case "--foreground":
 		case "--no-detach":
 		case "--background":

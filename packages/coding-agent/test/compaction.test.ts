@@ -283,6 +283,53 @@ describe("shouldCompact", () => {
 
 		expect(shouldCompact(95000, 0, settings)).toBe(false);
 	});
+
+	it("uses an explicit thresholdTokens instead of window headroom", () => {
+		const settings: CompactionSettings = {
+			enabled: true,
+			reserveTokens: 10000,
+			keepRecentTokens: 20000,
+			thresholdTokens: 50000,
+		};
+
+		// Window headroom alone would not trigger until 90k.
+		expect(shouldCompact(50001, 100000, settings)).toBe(true);
+		expect(shouldCompact(50000, 100000, settings)).toBe(false);
+	});
+
+	it("applies thresholdTokens even when the context window is unknown", () => {
+		const settings: CompactionSettings = {
+			enabled: true,
+			reserveTokens: 10000,
+			keepRecentTokens: 20000,
+			thresholdTokens: 50000,
+		};
+
+		expect(shouldCompact(60000, 0, settings)).toBe(true);
+	});
+
+	it("still honors enabled=false with an explicit thresholdTokens", () => {
+		const settings: CompactionSettings = {
+			enabled: false,
+			reserveTokens: 10000,
+			keepRecentTokens: 20000,
+			thresholdTokens: 50000,
+		};
+
+		expect(shouldCompact(60000, 100000, settings)).toBe(false);
+	});
+
+	it("ignores a non-positive thresholdTokens and falls back to window headroom", () => {
+		const settings: CompactionSettings = {
+			enabled: true,
+			reserveTokens: 10000,
+			keepRecentTokens: 20000,
+			thresholdTokens: 0,
+		};
+
+		expect(shouldCompact(95000, 100000, settings)).toBe(true);
+		expect(shouldCompact(89000, 100000, settings)).toBe(false);
+	});
 });
 
 describe("findCutPoint", () => {

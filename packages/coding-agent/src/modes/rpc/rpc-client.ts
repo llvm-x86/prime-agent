@@ -331,6 +331,13 @@ export class RpcClient {
 	}
 
 	/**
+	 * Set the absolute auto-compaction ceiling in tokens; undefined clears it.
+	 */
+	async setCompactionThreshold(tokens: number | undefined): Promise<void> {
+		await this.send({ type: "set_compaction_threshold", tokens });
+	}
+
+	/**
 	 * Set auto-retry enabled/disabled.
 	 */
 	async setAutoRetry(enabled: boolean): Promise<void> {

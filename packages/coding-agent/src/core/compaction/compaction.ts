@@ -123,6 +123,11 @@ export interface CompactionSettings {
 	enabled: boolean;
 	reserveTokens: number;
 	keepRecentTokens: number;
+	/**
+	 * Absolute context-token ceiling that triggers auto-compaction. When set (and
+	 * positive) it overrides the `contextWindow - reserveTokens` rule.
+	 */
+	thresholdTokens?: number;
 }
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
@@ -225,9 +230,17 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
 
 /**
  * Check if compaction should trigger based on context usage.
+ *
+ * An explicit `thresholdTokens` is an absolute ceiling on context size and
+ * takes precedence over the default window-relative headroom rule: it does not
+ * depend on the model's context window, so it also applies when the window is
+ * unknown.
  */
 export function shouldCompact(contextTokens: number, contextWindow: number, settings: CompactionSettings): boolean {
 	if (!settings.enabled) return false;
+	if (settings.thresholdTokens !== undefined && settings.thresholdTokens > 0) {
+		return contextTokens > settings.thresholdTokens;
+	}
 	if (contextWindow <= 0) return false;
 	return contextTokens > contextWindow - settings.reserveTokens;
 }

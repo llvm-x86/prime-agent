@@ -340,6 +340,8 @@ export interface AgentConnectionState {
 	sessionDir?: string;
 	leafId: string | null;
 	autoCompactionEnabled: boolean;
+	/** Absolute auto-compaction ceiling in tokens; undefined means window-relative. */
+	compactionThresholdTokens?: number;
 	messageCount: number;
 	sessionActions: SessionActionSnapshot;
 	compactionCount: number;
@@ -721,6 +723,7 @@ export interface AgentConnection {
 	setSteeringMode(mode: AgentConnectionQueueMode): Promise<void>;
 	setFollowUpMode(mode: AgentConnectionQueueMode): Promise<void>;
 	setAutoCompactionEnabled(enabled: boolean): Promise<void>;
+	setCompactionThresholdTokens(tokens: number | undefined): Promise<void>;
 	setAutoRetryEnabled(enabled: boolean): Promise<void>;
 
 	compact(customInstructions?: string): Promise<CompactionResult>;

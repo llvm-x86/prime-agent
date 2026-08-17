@@ -79,6 +79,7 @@ export interface HarnessOptions {
 	autoRefineReviewer?: AutoRefineReviewer;
 	serializedRefine?: boolean;
 	initialGoal?: { objective: string; tokenBudget?: number };
+	compactionThresholdTokens?: number;
 }
 
 export interface Harness {
@@ -203,6 +204,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		autoRefineReviewer: options.autoRefineReviewer,
 		serializedRefine: options.serializedRefine,
 		initialGoal: options.initialGoal,
+		compactionThresholdTokens: options.compactionThresholdTokens,
 	});
 
 	const events: AgentSessionEvent[] = [];

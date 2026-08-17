@@ -374,6 +374,24 @@ describe("runtime session option resolution", () => {
 			}),
 		).toMatchObject({ initialGoal: headlessCreateConfig.initialGoal });
 	});
+	test("keeps the session-scoped compaction threshold out of the daemon fallback", () => {
+		const createConfig = {
+			cwd: "/repo",
+			compactionThresholdTokens: 40_000,
+		};
+
+		const daemonFallback = daemonServerDefaultSessionConfig(createConfig);
+		expect(daemonFallback).toEqual({
+			cwd: "/repo",
+			initialGoal: undefined,
+			compactionThresholdTokens: undefined,
+		});
+		expect(
+			mergeAgentSessionRuntimeConfig(daemonFallback, {
+				compactionThresholdTokens: createConfig.compactionThresholdTokens,
+			}),
+		).toMatchObject({ compactionThresholdTokens: 40_000 });
+	});
 
 	test("preserves daemon-provided RLM heartbeat controller when creating sessions", () => {
 		const preparedModel = { id: "prepared-model" } as unknown as CreateAgentSessionOptions["model"];

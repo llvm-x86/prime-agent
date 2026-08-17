@@ -439,6 +439,45 @@ describe("daemon command", () => {
 		});
 	});
 
+	it("passes --compact-threshold to the create config", async () => {
+		await expect(
+			handleDaemonCommand([
+				"daemon",
+				"--socket",
+				"/tmp/prime-agent.sock",
+				"create",
+				"--compact-threshold",
+				"40000",
+				"my-session",
+			]),
+		).resolves.toBe(true);
+
+		expect(daemonClientMock.instances[0]?.requests[0]).toMatchObject({
+			type: "create",
+			name: "my-session",
+			config: { compactionThresholdTokens: 40000 },
+		});
+	});
+
+	it("rejects a non-positive --compact-threshold in daemon create", async () => {
+		await handleDaemonCommand([
+			"daemon",
+			"--socket",
+			"/tmp/prime-agent.sock",
+			"create",
+			"--compact-threshold",
+			"0",
+			"my-session",
+		]);
+		expect(process.exitCode).toBe(1);
+		expect(
+			consoleErrorMessages.some(
+				(m) => typeof m === "string" && m.includes("--compact-threshold must be a positive integer"),
+			),
+		).toBe(true);
+		expect(daemonClientMock.instances[0]?.requests.length).toBe(0);
+	});
+
 	it("rejects empty --goal in daemon create", async () => {
 		await handleDaemonCommand([
 			"daemon",

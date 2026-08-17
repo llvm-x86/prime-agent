@@ -45,6 +45,12 @@ export interface AgentSessionRuntimeConfig {
 	 * thread_goal_state entry (idempotent restart/rehydration).
 	 */
 	initialGoal?: { objective: string; tokenBudget?: number };
+	/**
+	 * Session-scoped absolute context-token ceiling for auto-compaction
+	 * (CLI `--compact-threshold`). Overrides the compaction.thresholdTokens
+	 * setting for this session only; never persisted.
+	 */
+	compactionThresholdTokens?: number;
 }
 
 export function mergeAgentSessionRuntimeConfig(
@@ -86,6 +92,7 @@ export function mergeAgentSessionRuntimeConfig(
 		executionMode: override.executionMode ?? base.executionMode,
 		telemetryDisabled: base.telemetryDisabled || override.telemetryDisabled ? true : undefined,
 		initialGoal: override.initialGoal ?? base.initialGoal,
+		compactionThresholdTokens: override.compactionThresholdTokens ?? base.compactionThresholdTokens,
 	};
 }
 

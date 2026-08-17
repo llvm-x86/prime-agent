@@ -508,6 +508,7 @@ const EARLY_LAUNCH_VALUE_FLAGS = new Set([
 	"--autonomous-timeout-ms",
 	"--goal",
 	"--goal-token-budget",
+	"--compact-threshold",
 ]);
 
 function findFirstEarlyLaunchPositional(args: readonly string[]): { index: number; value: string } | undefined {

@@ -458,6 +458,10 @@ export class InProcessAgentConnection implements AgentConnection {
 		this.session.setAutoCompactionEnabled(enabled);
 	}
 
+	async setCompactionThresholdTokens(tokens: number | undefined): Promise<void> {
+		this.session.setCompactionThresholdTokens(tokens);
+	}
+
 	async setAutoRetryEnabled(enabled: boolean): Promise<void> {
 		this.session.setAutoRetryEnabled(enabled);
 	}

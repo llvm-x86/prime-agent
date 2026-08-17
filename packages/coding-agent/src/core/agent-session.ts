@@ -106,6 +106,7 @@ import { type BashResult, executeBashWithOperations } from "./bash-executor.js";
 import {
 	COMPACT_SKILL_NAME,
 	type CompactionResult,
+	type CompactionSettings,
 	calculateContextTokens,
 	collectEntriesForBranchSummary,
 	compact,
@@ -442,6 +443,12 @@ export interface AgentSessionConfig {
 	 * available to the model. Default: the compaction.agentCallable setting.
 	 */
 	includeCompactSkill?: boolean;
+	/**
+	 * Session-scoped absolute context-token ceiling for auto-compaction. Overrides
+	 * the compaction.thresholdTokens setting for this session only (never
+	 * persisted). Default: the compaction.thresholdTokens setting.
+	 */
+	compactionThresholdTokens?: number;
 	/**
 	 * Optional host-side controller for the bundled rlm-heartbeat Python skill.
 	 * When omitted, rlm_heartbeat.* host requests are unavailable.
@@ -1181,6 +1188,7 @@ export class AgentSession {
 	private _allowedToolNames?: Set<string>;
 	private _includeGoals: boolean;
 	private _includeCompactSkill: boolean;
+	private _compactionThresholdTokens?: number;
 	private _rlmHeartbeatController?: AgentRlmHeartbeatController;
 	private _agentMessageController?: AgentSessionMessageController;
 	private _agentObserveController?: AgentObserveController;
@@ -1302,6 +1310,10 @@ export class AgentSession {
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._includeGoals = config.includeGoals ?? true;
 		this._includeCompactSkill = config.includeCompactSkill ?? this.settingsManager.getCompactionAgentCallable();
+		this._compactionThresholdTokens =
+			config.compactionThresholdTokens !== undefined && config.compactionThresholdTokens > 0
+				? config.compactionThresholdTokens
+				: undefined;
 		this._rlmHeartbeatController = config.rlmHeartbeatController;
 		this._agentMessageController = config.agentMessageController;
 		this._agentObserveController = config.agentObserveController;
@@ -2680,7 +2692,7 @@ export class AgentSession {
 	}
 
 	private async _thresholdCompactionNeeded(context: ShouldStopAfterTurnContext): Promise<boolean> {
-		const settings = this.settingsManager.getCompactionSettings();
+		const settings = this._compactionSettings();
 		if (!settings.enabled) return false;
 
 		const contextWindow = this.model?.contextWindow ?? 0;
@@ -2874,10 +2886,7 @@ export class AgentSession {
 						reason: "no active turn; compaction can only be requested while a turn is running",
 					};
 				}
-				const preparation = prepareCompaction(
-					this.sessionManager.getBranch(),
-					this.settingsManager.getCompactionSettings(),
-				);
+				const preparation = prepareCompaction(this.sessionManager.getBranch(), this._compactionSettings());
 				if (!preparation) {
 					const lastEntry = this.sessionManager.getBranch().at(-1);
 					return {
@@ -7248,6 +7257,18 @@ export class AgentSession {
 		return { model: fallbackModel, ...auth };
 	}
 
+	/**
+	 * Compaction settings for this session: the persisted settings with the
+	 * session-scoped auto-compaction threshold (CLI `--compact-threshold`)
+	 * layered on top. Kept out of SettingsManager so the override cannot leak
+	 * into sibling sessions sharing a settings manager, or be persisted.
+	 */
+	private _compactionSettings(): CompactionSettings {
+		const settings = this.settingsManager.getCompactionSettings();
+		if (this._compactionThresholdTokens === undefined) return settings;
+		return { ...settings, thresholdTokens: this._compactionThresholdTokens };
+	}
+
 	private _looksLikeContextOverflow(message: string): boolean {
 		return /context.{0,20}(length|window)|too (long|large)|maximum context|context_length_exceeded|exceeds? the (context|model)/i.test(
 			message,
@@ -7373,7 +7394,7 @@ export class AgentSession {
 	}): Promise<CompactionResult> {
 		const { model, apiKey, headers, customInstructions, signal } = options;
 		const pathEntries = this.sessionManager.getBranch();
-		const settings = this.settingsManager.getCompactionSettings();
+		const settings = this._compactionSettings();
 
 		const preparation = prepareCompaction(pathEntries, settings);
 		if (!preparation) {
@@ -8230,7 +8251,7 @@ export class AgentSession {
 			if (skipAbortedCheck) return false;
 		}
 
-		const settings = this.settingsManager.getCompactionSettings();
+		const settings = this._compactionSettings();
 		const contextWindow = this.model?.contextWindow ?? 0;
 
 		// Skip overflow check if the message came from a different model.
@@ -8496,6 +8517,22 @@ export class AgentSession {
 	/** Whether auto-compaction is enabled */
 	get autoCompactionEnabled(): boolean {
 		return this.settingsManager.getCompactionEnabled();
+	}
+
+	/**
+	 * Set the absolute auto-compaction ceiling, persisting it as the new default.
+	 * An explicit change here also drops any `--compact-threshold` session
+	 * override, which would otherwise shadow the value the user just chose.
+	 * `undefined` clears the ceiling and restores the window-relative rule.
+	 */
+	setCompactionThresholdTokens(tokens: number | undefined): void {
+		this._compactionThresholdTokens = undefined;
+		this.settingsManager.setCompactionThresholdTokens(tokens);
+	}
+
+	/** Absolute auto-compaction ceiling in effect; undefined means window-relative. */
+	get compactionThresholdTokens(): number | undefined {
+		return this._compactionSettings().thresholdTokens;
 	}
 
 	/**

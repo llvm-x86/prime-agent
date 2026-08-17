@@ -129,6 +129,26 @@ describe("mergeAgentSessionRuntimeConfig", () => {
 		expect(merged.initialGoal).toEqual({ objective: "override goal" });
 	});
 
+	it("merges compactionThresholdTokens from override over base", () => {
+		const defaults: AgentSessionRuntimeConfig = {
+			cwd: "/repo",
+			agentDir: "/agent",
+			compactionThresholdTokens: 40000,
+		};
+		const merged = mergeAgentSessionRuntimeConfig(defaults, { compactionThresholdTokens: 90000 });
+		expect(merged.compactionThresholdTokens).toBe(90000);
+	});
+
+	it("preserves base compactionThresholdTokens when override omits it", () => {
+		const defaults: AgentSessionRuntimeConfig = {
+			cwd: "/repo",
+			agentDir: "/agent",
+			compactionThresholdTokens: 40000,
+		};
+		const merged = mergeAgentSessionRuntimeConfig(defaults, { model: "openai/gpt-4o" });
+		expect(merged.compactionThresholdTokens).toBe(40000);
+	});
+
 	it("preserves base initialGoal when override omits it", () => {
 		const defaults: AgentSessionRuntimeConfig = {
 			cwd: "/repo",

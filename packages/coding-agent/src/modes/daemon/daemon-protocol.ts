@@ -60,8 +60,9 @@ export const DAEMON_COMMAND_ENVELOPE_MIN_PROTOCOL_VERSION = 7;
 // Revision 14 carries the client's monotonic telemetry opt-out on attach and reattach.
 // Revision 15 adds the mutate_queued_message command and queue_message_mutation capability.
 // Revision 16 adds the "stopping" workerState and stops reporting disconnected workers as "ready".
-export const DAEMON_SCHEMA_REVISION = 16;
-export const DAEMON_SCHEMA_ID = "protocol-7-schema-16-1bcb9e7f1a49";
+// Revision 17 adds the set_compaction_threshold command for the auto-compaction ceiling.
+export const DAEMON_SCHEMA_REVISION = 17;
+export const DAEMON_SCHEMA_ID = "protocol-7-schema-17-136a92177e5d";
 
 export type DaemonProtocolName = typeof DAEMON_PROTOCOL_NAME;
 export type DaemonProtocolVersion = number;
@@ -563,6 +564,7 @@ export type DaemonCommand =
 	| { id?: string; type: "set_steering_mode"; activeSessionId: string; mode: AgentConnectionQueueMode }
 	| { id?: string; type: "set_follow_up_mode"; activeSessionId: string; mode: AgentConnectionQueueMode }
 	| { id?: string; type: "set_auto_compaction"; activeSessionId: string; enabled: boolean }
+	| { id?: string; type: "set_compaction_threshold"; activeSessionId: string; tokens?: number }
 	| { id?: string; type: "set_auto_retry"; activeSessionId: string; enabled: boolean }
 	| { id?: string; type: "compact"; activeSessionId: string; customInstructions?: string }
 	| {
@@ -717,6 +719,7 @@ export const DAEMON_COMMAND_COMPATIBILITY = {
 	set_steering_mode: LEGACY_DAEMON_COMMAND,
 	set_follow_up_mode: LEGACY_DAEMON_COMMAND,
 	set_auto_compaction: LEGACY_DAEMON_COMMAND,
+	set_compaction_threshold: CURRENT_DAEMON_COMMAND,
 	set_auto_retry: CURRENT_DAEMON_COMMAND,
 	compact: LEGACY_DAEMON_COMMAND,
 	refine: LEGACY_DAEMON_COMMAND,
