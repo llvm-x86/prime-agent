@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Added `autoRefine.beforeCompact` to run harness refinement *before* auto-compaction summarizes the context, so the reviewer still sees the detail compaction is about to discard; it replaces the post-compaction pass for that compaction.
+- Added `--compact-threshold <tokens>` and an "Auto-compact threshold" entry in `/settings` (presets, `off`, or a typed value) to cap context growth by absolute token count instead of only relative to the model's window.
+- Fixed a session dying with "The Prime Agent daemon shut down while this window was attached": a window that rebuilt its daemon connection lost ownership of its own session, so attach failed with "Unknown active session" and the worker was reaped 30 seconds later.
 - Fixed fullscreen wheel scrolling in Ghostty while retaining application link clicks; set `terminal.fullscreenMouse` to `false` to use native Cmd-click instead.
 - Changed the agents view to sort idle and inactive sessions by last message time, newest first, while keeping running agents in stable creation order.
 - Fixed `openai-codex` models being invisible to `rlm` subagents and `find_models` because model discovery reported Prime Agent's own version as the Codex client version ([#1375](https://github.com/PrimeIntellect-ai/prime-agent/pull/1375) by [@bilelrais](https://github.com/bilelrais)).

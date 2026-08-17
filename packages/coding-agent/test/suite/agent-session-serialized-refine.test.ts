@@ -1511,7 +1511,7 @@ describe("Serialized refine review-fix regressions", () => {
 		});
 		harnesses.push(harness);
 		const internals = harness.session as unknown as SerializedInternals;
-		const settings = { enabled: true, compact: true, turnInterval: 1, cooldownMs: 60_000 };
+		const settings = { enabled: true, compact: true, beforeCompact: false, turnInterval: 1, cooldownMs: 60_000 };
 		vi.spyOn(harness.session.settingsManager, "getAutoRefineSettings")
 			.mockReturnValueOnce(settings)
 			.mockReturnValue({ ...settings, cooldownMs: 0 });

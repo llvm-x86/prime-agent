@@ -226,6 +226,7 @@ describe("SettingsManager", () => {
 				enabled: true,
 				turnInterval: 25,
 				compact: true,
+				beforeCompact: false,
 				cooldownMs: 20 * 60_000,
 			});
 
@@ -272,6 +273,15 @@ describe("SettingsManager", () => {
 			const settings = manager.getAutoRefineSettings();
 			expect(settings.turnInterval).toBe(5);
 			expect(settings.cooldownMs).toBe(1000);
+		});
+
+		it("opts in to refining before compaction", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ autoRefine: { beforeCompact: true } }));
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getAutoRefineSettings().beforeCompact).toBe(true);
+			// The post-compaction pass stays available for sessions that leave it on.
+			expect(manager.getAutoRefineSettings().compact).toBe(true);
 		});
 	});
 

@@ -31,6 +31,12 @@ export interface AutoRefineSettings {
 	enabled?: boolean; // default: true
 	turnInterval?: number; // default: 25 assistant turns
 	compact?: boolean; // default: true
+	/**
+	 * Run refinement *before* auto-compaction summarizes the context, so the
+	 * reviewer still sees the detail compaction is about to discard. Replaces
+	 * the post-compaction pass for that compaction.
+	 */
+	beforeCompact?: boolean; // default: false
 	cooldownMs?: number; // default: 20 minutes
 }
 
@@ -920,7 +926,13 @@ export class SettingsManager {
 		};
 	}
 
-	getAutoRefineSettings(): { enabled: boolean; turnInterval: number; compact: boolean; cooldownMs: number } {
+	getAutoRefineSettings(): {
+		enabled: boolean;
+		turnInterval: number;
+		compact: boolean;
+		beforeCompact: boolean;
+		cooldownMs: number;
+	} {
 		const turnInterval = this.settings.autoRefine?.turnInterval;
 		const cooldownMs = this.settings.autoRefine?.cooldownMs;
 		return {
@@ -930,6 +942,7 @@ export class SettingsManager {
 				typeof turnInterval === "number" && Number.isFinite(turnInterval) ? turnInterval : 25,
 			),
 			compact: this.settings.autoRefine?.compact ?? true,
+			beforeCompact: this.settings.autoRefine?.beforeCompact ?? false,
 			cooldownMs: Math.max(
 				0,
 				typeof cooldownMs === "number" && Number.isFinite(cooldownMs) ? cooldownMs : 20 * 60_000,

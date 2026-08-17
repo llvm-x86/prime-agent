@@ -1264,6 +1264,8 @@ export class AgentSession {
 	private readonly _scheduledAutoRefineTimers = new Set<ReturnType<typeof setTimeout>>();
 	private _compactAutoRefinePending = false;
 	private _turnIntervalAutoRefinePending = false;
+	/** Set when refinement already ran for the compaction currently in flight. */
+	private _refinedBeforeCompaction = false;
 	private _postCompactionContinuationScheduled = false;
 	private _postCompactionContinuationTimer: ReturnType<typeof setTimeout> | undefined;
 	private _postCompactionContinuationMessages: AgentMessage[] = [];
@@ -7573,8 +7575,39 @@ export class AgentSession {
 		this._scheduleAutoRefine("turn_interval");
 	}
 
+	/**
+	 * Run refinement before compaction summarizes the context away, when
+	 * `autoRefine.beforeCompact` is set.
+	 *
+	 * Deliberately bypasses the cooldown and the active-agent deferral that
+	 * `_maybeAutoRefine` applies: compaction is the last moment the reviewer can
+	 * still see the detail being discarded, and deferring here would mean the
+	 * pass never happens for this compaction. Returns true when it ran, so the
+	 * post-compaction pass can be skipped.
+	 */
+	private async _refineBeforeCompaction(): Promise<boolean> {
+		if (this._disposed || this._disposing || !this._autoRefineAllowedForSession()) {
+			return false;
+		}
+		const settings = this.settingsManager.getAutoRefineSettings();
+		if (!settings.enabled || !settings.beforeCompact || !settings.compact) {
+			return false;
+		}
+		if (this._autoRefineInProgress || !this.model) {
+			return false;
+		}
+		this._compactAutoRefinePending = false;
+		await this._runSerializedAutoRefineReview("compact", this._autoRefineBranchVersion);
+		return true;
+	}
+
 	private _scheduleAutoRefineAfterCompaction(willContinueAfterCompaction: boolean): void {
 		if (!this._autoRefineAllowedForSession()) {
+			return;
+		}
+		if (this._refinedBeforeCompaction) {
+			// Refinement already ran against the pre-compaction context; a second
+			// pass would only review the summary it just produced.
 			return;
 		}
 		if (this._serializedRefine) {
@@ -8409,6 +8442,11 @@ export class AgentSession {
 			}
 		};
 
+		// Refine before the summarizer runs, while the context it will discard is
+		// still intact. Runs outside the compaction_start/end window so refine
+		// events are not nested inside a compaction the UI shows as in progress.
+		this._refinedBeforeCompaction = await this._refineBeforeCompaction();
+
 		this._emit({ type: "compaction_start", reason, customInstructions });
 		this._autoCompactionAbortController = new AbortController();
 
@@ -8503,6 +8541,9 @@ export class AgentSession {
 			return false;
 		} finally {
 			this._autoCompactionAbortController = undefined;
+			// Scoped to this compaction: the post-compaction scheduler above has
+			// already consulted it, so a failed or later compaction is unaffected.
+			this._refinedBeforeCompaction = false;
 			this._scheduleSessionInputPump();
 		}
 	}
