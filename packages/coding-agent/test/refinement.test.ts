@@ -1517,3 +1517,106 @@ describe("global refinement history", () => {
 		expect(plan.rollbackScope).toBe("global");
 	});
 });
+
+describe("malformed persisted harness entries", () => {
+	function writeState(entries: Record<string, unknown>): string {
+		const dir = makeTempDir();
+		writeFileSync(
+			getHarnessStatePath(dir),
+			JSON.stringify({
+				schema: 1,
+				entries: { prompt: {}, memory: entries, skill: {}, subagent: {} },
+				refinements: [],
+			}),
+		);
+		return dir;
+	}
+
+	const baseEntry = {
+		id: "legacy_entry",
+		kind: "memory",
+		title: "Legacy entry",
+		path: "general",
+		reference: {},
+		arguments: {},
+		metadata: {},
+		source: "refine",
+		created_at: "2026-01-01T00:00:00.000Z",
+		updated_at: "2026-01-01T00:00:00.000Z",
+		version: 2,
+	};
+
+	it("joins a content array of lines written by an earlier build", () => {
+		const state = loadHarnessState(
+			writeState({
+				legacy_entry: { ...baseEntry, content: ["first line", "second line"] },
+			}),
+		);
+
+		expect(state.entries.memory.legacy_entry.content).toBe("first line\nsecond line");
+		expect(state.entries.memory.legacy_entry.version).toBe(2);
+	});
+
+	it("drops an entry whose content cannot be read as text instead of throwing", () => {
+		const state = loadHarnessState(
+			writeState({
+				unreadable: { ...baseEntry, content: { text: "nested" } },
+				numeric: { ...baseEntry, content: 42 },
+				usable: { ...baseEntry, content: "plain text" },
+			}),
+		);
+
+		expect(Object.keys(state.entries.memory)).toEqual(["usable"]);
+	});
+
+	it("keeps /refine working when a persisted entry has non-string content", async () => {
+		const state = loadHarnessState(
+			writeState({
+				legacy_entry: { ...baseEntry, content: ["persisted", "as an array"] },
+			}),
+		);
+		completeSimpleMock.mockResolvedValue(
+			assistantText('{"summary":"s","rationale":"r","expectedOutcome":"o","edits":[]}'),
+		);
+
+		const result = await refineHarness([], state, [], createRefineModel(false), "api-key", {});
+
+		expect(result.summary).toBe("s");
+		expect(completeSimpleMock.mock.calls[0][1].messages[0].content[0].text).toContain("persisted as an array");
+	});
+
+	it("renders a prompt for a state whose entry titles and paths are malformed", () => {
+		const state = loadHarnessState(
+			writeState({
+				legacy_entry: { ...baseEntry, title: 7, path: null, content: "body" },
+			}),
+		);
+
+		const rendered = formatHarnessStateForPrompt(state);
+
+		expect(rendered).toContain("legacy_entry");
+		expect(rendered).toContain("general");
+	});
+
+	it("accepts refiner content emitted as an array of lines", async () => {
+		const state = loadHarnessState(makeTempDir());
+		completeSimpleMock.mockResolvedValue(
+			assistantText(
+				JSON.stringify({
+					summary: "s",
+					rationale: "r",
+					expectedOutcome: "o",
+					edits: [
+						{ action: "create", kind: "memory", id: "arr", title: "Array content", content: ["one", "two"] },
+					],
+				}),
+			),
+		);
+
+		const result = await refineHarness([], state, [], createRefineModel(false), "api-key", {});
+
+		// Previously validateEdit rejected this with "create requires title and content".
+		expect(result.appliedEdits[0]).toMatchObject({ applied: true });
+		expect(result.appliedEdits[0]?.after?.content).toBe("one\ntwo");
+	});
+});

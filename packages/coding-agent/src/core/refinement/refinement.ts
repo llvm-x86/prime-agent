@@ -278,6 +278,58 @@ export function getHarnessStatePath(harnessStateDir: string = getGlobalHarnessSt
 	return join(harnessStateDir, "harness_state.json");
 }
 
+/**
+ * Text fields on disk are only as trustworthy as whatever wrote them: earlier
+ * builds, a hand edit, or a future writer can leave a non-string where a string
+ * is declared. A list of lines is the one malformed shape with an unambiguous
+ * reading, so it is joined; anything else is unrenderable.
+ */
+function entryText(value: unknown): string | undefined {
+	if (typeof value === "string") {
+		return value;
+	}
+	if (Array.isArray(value) && value.every((line) => typeof line === "string")) {
+		return value.join("\n");
+	}
+	return undefined;
+}
+
+/**
+ * loadHarnessState degrades a corrupt state *file* to empty rather than throwing,
+ * because it runs on every system-prompt build and before every `/refine`. The
+ * same has to hold per entry: one entry whose `content` is not a string used to
+ * reach `overviewForPrompt`, where `.replace` threw and killed `/refine` on every
+ * invocation for that session. Salvage what is readable, drop what is not.
+ */
+function sanitizeEntry(
+	entry: Record<string, unknown>,
+	id: string,
+	kind: RefinementKind,
+	scope: HarnessScope,
+): HarnessEntry | undefined {
+	const content = entryText(entry.content);
+	if (content === undefined) {
+		return undefined;
+	}
+	const title = entryText(entry.title) ?? id;
+	return {
+		...(entry as unknown as HarnessEntry),
+		id: typeof entry.id === "string" ? entry.id : id,
+		kind,
+		title,
+		content,
+		path: entryText(entry.path) ?? "general",
+		source: typeof entry.source === "string" ? entry.source : "",
+		created_at: typeof entry.created_at === "string" ? entry.created_at : "",
+		updated_at: typeof entry.updated_at === "string" ? entry.updated_at : "",
+		version: typeof entry.version === "number" && Number.isFinite(entry.version) ? entry.version : 1,
+		scope: normalizeHarnessScope(entry.scope, scope),
+		reference: objectRecord(entry.reference) ?? {},
+		arguments: objectRecord(entry.arguments) ?? {},
+		metadata: objectRecord(entry.metadata) ?? {},
+	};
+}
+
 export function loadHarnessState(
 	harnessStateDir: string = getGlobalHarnessStateDir(),
 	scope: HarnessScope = "global",
@@ -307,13 +359,9 @@ export function loadHarnessState(
 			for (const [id, rawEntry] of Object.entries(records)) {
 				const entry = objectRecord(rawEntry);
 				if (!entry) continue;
-				state.entries[kind][id] = {
-					...(entry as unknown as HarnessEntry),
-					scope: normalizeHarnessScope(entry.scope, scope),
-					reference: objectRecord(entry.reference) ?? {},
-					arguments: objectRecord(entry.arguments) ?? {},
-					metadata: objectRecord(entry.metadata) ?? {},
-				};
+				const sanitized = sanitizeEntry(entry, id, kind, scope);
+				if (!sanitized) continue;
+				state.entries[kind][id] = sanitized;
 			}
 		}
 	}
@@ -648,7 +696,10 @@ function parseProposal(text: string): RefinementProposal {
 				kind: edit.kind as RefinementKind,
 				id: typeof edit.id === "string" ? edit.id : undefined,
 				title: typeof edit.title === "string" ? edit.title : undefined,
-				content: typeof edit.content === "string" ? edit.content : undefined,
+				// Models routinely emit multi-line content as an array of lines. Dropping it
+				// here made validateEdit reject the whole edit with "requires title and
+				// content", losing the refinement for a purely cosmetic shape difference.
+				content: entryText(edit.content),
 				path: typeof edit.path === "string" ? edit.path : undefined,
 				reference: objectRecord(edit.reference),
 				arguments: objectRecord(edit.arguments),
