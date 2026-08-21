@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `x-preview-f-free` ("Ox Alpha") reasoning-content replay compat for the `opencode` provider so multi-turn agent sessions don't hit the gateway's 400-on-replay when `reasoning_content` is omitted, matching the DeepSeek-family fix.
+
 ## [0.7.2] - 2026-08-11
 
 ## [0.7.1] - 2026-08-07

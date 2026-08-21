@@ -1923,6 +1923,18 @@ async function generateModels() {
 		}
 	}
 
+	// Ox Alpha ("x-preview-f-free", OpenCode Zen free/stealth tier) streams
+	// reasoning in reasoning_content like the DeepSeek family (verified live:
+	// chat/completions with tools set returns reasoning_content + tool_calls).
+	// models.dev doesn't mark it deepseek-shaped, so give it the same replay
+	// compat directly to avoid the gateway 400-on-replay hazard DeepSeek-style
+	// reasoning models hit when reasoning_content is omitted on resend.
+	for (const candidate of allModels) {
+		if (candidate.provider === "opencode" && candidate.id === "x-preview-f-free") {
+			candidate.compat = { ...candidate.compat, ...DEEPSEEK_V4_COMPAT };
+		}
+	}
+
 	const minimaxDirectSupportedIds = new Set(["MiniMax-M2.7", "MiniMax-M2.7-highspeed"]);
 
 	for (const candidate of allModels) {
